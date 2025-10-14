@@ -4,17 +4,22 @@ import os
 
 app = Flask(__name__)
 
-# ✅ Ak nie je definovaný DATABASE_URL, použi SQLite ako fallback
+# ✅ Získaj URL databázy alebo použi SQLite ako fallback
 db_url = os.environ.get("DATABASE_URL", "sqlite:///local.db")
-# Render niekedy pridáva "postgres://" namiesto "postgresql://"
+
+# Render niekedy používa zastaraný prefix alebo starý driver
 if db_url.startswith("postgres://"):
-    db_url = db_url.replace("postgres://", "postgresql://", 1)
+    db_url = db_url.replace("postgres://", "postgresql+psycopg://", 1)
+elif db_url.startswith("postgresql+psycopg2://"):
+    db_url = db_url.replace("postgresql+psycopg2://", "postgresql+psycopg://", 1)
 
 app.config["SQLALCHEMY_DATABASE_URI"] = db_url
 app.config["SQLALCHEMY_TRACK_MODIFICATIONS"] = False
 
 db = SQLAlchemy(app)
 
+
+# ✅ Model pre diagnostické dáta
 class DiagnosticData(db.Model):
     id = db.Column(db.Integer, primary_key=True)
     car_id = db.Column(db.String(50))
@@ -22,6 +27,8 @@ class DiagnosticData(db.Model):
     severity = db.Column(db.String(20))
     timestamp = db.Column(db.DateTime)
 
+
+# ✅ Endpoint na prijímanie dát z auta
 @app.route("/api/data", methods=["POST"])
 def receive_data():
     data = request.get_json()
@@ -34,12 +41,15 @@ def receive_data():
     db.session.commit()
     return jsonify({"status": "ok"})
 
+
+# ✅ Testovací endpoint
 @app.route("/", methods=["GET"])
 def home():
     return jsonify({"message": "Flask server running successfully 🚀"})
 
-# ✅ Pridaj toto, aby Render vedel, čo spúšťať aj lokálne
+
+# ✅ Spúšťací bod (Render aj lokálne)
 if __name__ == "__main__":
     with app.app_context():
-        db.create_all()  # vytvorí tabuľku ak neexistuje
+        db.create_all()  # vytvorí tabuľky, ak neexistujú
     app.run(host="0.0.0.0", port=int(os.environ.get("PORT", 5000)))
