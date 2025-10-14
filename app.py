@@ -3,7 +3,16 @@ from flask_sqlalchemy import SQLAlchemy
 import os
 
 app = Flask(__name__)
-app.config["SQLALCHEMY_DATABASE_URI"] = os.environ.get("DATABASE_URL")
+
+# ✅ Ak nie je definovaný DATABASE_URL, použi SQLite ako fallback
+db_url = os.environ.get("DATABASE_URL", "sqlite:///local.db")
+# Render niekedy pridáva "postgres://" namiesto "postgresql://"
+if db_url.startswith("postgres://"):
+    db_url = db_url.replace("postgres://", "postgresql://", 1)
+
+app.config["SQLALCHEMY_DATABASE_URI"] = db_url
+app.config["SQLALCHEMY_TRACK_MODIFICATIONS"] = False
+
 db = SQLAlchemy(app)
 
 class DiagnosticData(db.Model):
@@ -17,10 +26,20 @@ class DiagnosticData(db.Model):
 def receive_data():
     data = request.get_json()
     new_entry = DiagnosticData(
-        car_id=data["car_id"],
-        code=data["code"],
+        car_id=data.get("car_id"),
+        code=data.get("code"),
         severity=data.get("severity", "unknown")
     )
     db.session.add(new_entry)
     db.session.commit()
     return jsonify({"status": "ok"})
+
+@app.route("/", methods=["GET"])
+def home():
+    return jsonify({"message": "Flask server running successfully 🚀"})
+
+# ✅ Pridaj toto, aby Render vedel, čo spúšťať aj lokálne
+if __name__ == "__main__":
+    with app.app_context():
+        db.create_all()  # vytvorí tabuľku ak neexistuje
+    app.run(host="0.0.0.0", port=int(os.environ.get("PORT", 5000)))
