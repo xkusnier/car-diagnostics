@@ -7,11 +7,11 @@ app = Flask(__name__)
 # ✅ Získaj URL databázy alebo použi SQLite ako fallback
 db_url = os.environ.get("DATABASE_URL", "sqlite:///local.db")
 
-# Render niekedy používa zastaraný prefix alebo starý driver
+# ✅ Render niekedy dáva "postgres://" alebo "postgresql://" → treba nahradiť
 if db_url.startswith("postgres://"):
     db_url = db_url.replace("postgres://", "postgresql+psycopg://", 1)
-elif db_url.startswith("postgresql+psycopg2://"):
-    db_url = db_url.replace("postgresql+psycopg2://", "postgresql+psycopg://", 1)
+elif db_url.startswith("postgresql://") and "+psycopg" not in db_url:
+    db_url = db_url.replace("postgresql://", "postgresql+psycopg://", 1)
 
 app.config["SQLALCHEMY_DATABASE_URI"] = db_url
 app.config["SQLALCHEMY_TRACK_MODIFICATIONS"] = False
@@ -28,7 +28,7 @@ class DiagnosticData(db.Model):
     timestamp = db.Column(db.DateTime)
 
 
-# ✅ Endpoint na prijímanie dát z auta
+# ✅ Endpoint na prijímanie dát
 @app.route("/api/data", methods=["POST"])
 def receive_data():
     data = request.get_json()
@@ -48,7 +48,7 @@ def home():
     return jsonify({"message": "Flask server running successfully 🚀"})
 
 
-# ✅ Spúšťací bod (Render aj lokálne)
+# ✅ Spúšťací bod
 if __name__ == "__main__":
     with app.app_context():
         db.create_all()  # vytvorí tabuľky, ak neexistujú
