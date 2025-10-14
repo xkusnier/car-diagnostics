@@ -2,11 +2,9 @@ services:
   - type: web
     name: car-diagnostics
     env: python
+    plan: free
     buildCommand: pip install -r requirements.txt
     startCommand: gunicorn app:app
     envVars:
       - key: PYTHON_VERSION
         value: 3.11.9
-      - key: DATABASE_URL
-        value: your_postgres_connection_url_here
-
