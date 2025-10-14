@@ -1,13 +1,22 @@
 <!DOCTYPE html>
-<html>
+<html lang="sk">
 <head>
-  <title>Diagnostics Dashboard</title>
-  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
-  <link rel="stylesheet" href="/static/css/style.css">
+    <meta charset="UTF-8">
+    <title>Car Diagnostics Dashboard</title>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
 </head>
 <body>
-  <h1>Vehicle Diagnostics</h1>
-  <canvas id="chart"></canvas>
-  <script src="/static/js/dashboard.js"></script>
+    <h1>🚗 Diagnostika vozidiel</h1>
+    <h3>Posledné chyby</h3>
+    <ul>
+        {% for r in records %}
+        <li>{{ r.timestamp }} — {{ r.car_id }} — {{ r.code }} — {{ r.severity }}</li>
+        {% endfor %}
+    </ul>
+
+    <h3>Graf chýb podľa závažnosti</h3>
+    <canvas id="chart" width="400" height="200"></canvas>
+
+    <script src="/static/script.js"></script>
 </body>
 </html>
