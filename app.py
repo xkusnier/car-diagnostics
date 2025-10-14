@@ -18,7 +18,6 @@ app.config["SQLALCHEMY_TRACK_MODIFICATIONS"] = False
 
 db = SQLAlchemy(app)
 
-
 # ✅ Model pre diagnostické dáta
 class DiagnosticData(db.Model):
     id = db.Column(db.Integer, primary_key=True)
@@ -27,6 +26,12 @@ class DiagnosticData(db.Model):
     severity = db.Column(db.String(20))
     timestamp = db.Column(db.DateTime)
 
+# ✅ Endpoint na inicializáciu databázy
+@app.route("/init-db")
+def init_db():
+    with app.app_context():
+        db.create_all()
+    return jsonify({"status": "Database initialized ✅"})
 
 # ✅ Endpoint na prijímanie dát
 @app.route("/api/data", methods=["POST"])
@@ -41,12 +46,10 @@ def receive_data():
     db.session.commit()
     return jsonify({"status": "ok"})
 
-
 # ✅ Testovací endpoint
 @app.route("/", methods=["GET"])
 def home():
     return jsonify({"message": "Flask server running successfully 🚀"})
-
 
 # ✅ Spúšťací bod
 if __name__ == "__main__":
