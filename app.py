@@ -36,6 +36,11 @@ def init_db():
     db.create_all()
     return jsonify({"status": "Database initialized ✅"})
 
+# ✅ Root route pre Render kontrolu
+@app.route("/", methods=["GET"])
+def home():
+    return jsonify({"status": "ok", "message": "Flask backend running 🚀"})
+
 # ✅ Endpoint na prijímanie CAN packetov
 @app.route("/api/can", methods=["POST"])
 def receive_can_packet():
@@ -48,7 +53,8 @@ def receive_can_packet():
     alebo
     {
         "type": "DTC",
-        "data": "P0301"
+        "data": "50303330",
+        "vin": "4A374E453147303036343234"   # voliteľné, ak chceme presne priradiť
     }
     """
     try:
@@ -74,20 +80,34 @@ def receive_can_packet():
             return jsonify({"status": "VIN stored", "vin": vin}), 201
 
         elif packet_type.upper() == "DTC":
+            # dekódovanie hex -> string
             dtc_code = bytes.fromhex(data_hex).decode(errors="ignore").strip()
             if not dtc_code:
                 return jsonify({"error": "Invalid DTC data"}), 400
 
-            # priradi DTC k poslednému VIN, ktoré bolo prijaté
-            last_vehicle = Vehicle.query.order_by(Vehicle.id.desc()).first()
-            if not last_vehicle:
-                return jsonify({"error": "No VIN found to assign DTC"}), 400
+            # zistí VIN ak je prítomné v tele
+            vin_hex = payload.get("vin")
+            if vin_hex:
+                vin = bytes.fromhex(vin_hex).decode(errors="ignore").strip()
+                vehicle = Vehicle.query.filter_by(vin=vin).first()
+                if not vehicle:
+                    return jsonify({"error": f"VIN '{vin}' not found"}), 404
+            else:
+                # ak nebolo zadané, zober posledný VIN
+                vehicle = Vehicle.query.order_by(Vehicle.id.desc()).first()
+                if not vehicle:
+                    return jsonify({"error": "No VIN found to assign DTC"}), 400
 
-            new_dtc = DTCCode(vin_id=last_vehicle.id, dtc_code=dtc_code)
+            # pridaj nový DTC k danému VIN
+            new_dtc = DTCCode(vin_id=vehicle.id, dtc_code=dtc_code)
             db.session.add(new_dtc)
             db.session.commit()
 
-            return jsonify({"status": "DTC stored", "vin": last_vehicle.vin, "dtc": dtc_code}), 201
+            return jsonify({
+                "status": "DTC stored",
+                "vin": vehicle.vin,
+                "dtc": dtc_code
+            }), 201
 
         else:
             return jsonify({"error": "Unknown packet type"}), 400
