@@ -47,70 +47,53 @@ def receive_can_packet():
     """
     Očakáva JSON:
     {
-        "type": "VIN",
         "data": "4A374E453147303036343234"
     }
-    alebo
-    {
-        "type": "DTC",
-        "data": "50303330",
-        "vin": "4A374E453147303036343234"   # voliteľné, ak chceme presne priradiť
-    }
+    Backend automaticky rozlíši VIN alebo DTC podľa dĺžky a formátu.
     """
     try:
         payload = request.get_json()
-        packet_type = payload.get("type")
         data_hex = payload.get("data")
 
-        if not packet_type or not data_hex:
-            return jsonify({"error": "Missing fields 'type' or 'data'"}), 400
+        if not data_hex:
+            return jsonify({"error": "Missing field 'data'"}), 400
 
-        if packet_type.upper() == "VIN":
-            # dekódovanie hex -> string
-            vin = bytes.fromhex(data_hex).decode(errors="ignore").strip()
-            if not vin:
-                return jsonify({"error": "Invalid VIN data"}), 400
+        # dekóduj hex -> text
+        decoded_str = bytes.fromhex(data_hex).decode(errors="ignore").strip()
 
+        if not decoded_str:
+            return jsonify({"error": "Invalid hex data"}), 400
+
+        # Rozlíšenie typu
+        if len(decoded_str) > 15:  # typicky VIN (17 znakov)
+            vin = decoded_str
             vehicle = Vehicle.query.filter_by(vin=vin).first()
             if not vehicle:
                 vehicle = Vehicle(vin=vin)
                 db.session.add(vehicle)
                 db.session.commit()
 
-            return jsonify({"status": "VIN stored", "vin": vin}), 201
+            return jsonify({
+                "status": "VIN stored",
+                "vin": vin
+            }), 201
 
-        elif packet_type.upper() == "DTC":
-            # dekódovanie hex -> string
-            dtc_code = bytes.fromhex(data_hex).decode(errors="ignore").strip()
-            if not dtc_code:
-                return jsonify({"error": "Invalid DTC data"}), 400
+        else:  # typicky DTC
+            dtc_code = decoded_str
+            last_vehicle = Vehicle.query.order_by(Vehicle.id.desc()).first()
 
-            # zistí VIN ak je prítomné v tele
-            vin_hex = payload.get("vin")
-            if vin_hex:
-                vin = bytes.fromhex(vin_hex).decode(errors="ignore").strip()
-                vehicle = Vehicle.query.filter_by(vin=vin).first()
-                if not vehicle:
-                    return jsonify({"error": f"VIN '{vin}' not found"}), 404
-            else:
-                # ak nebolo zadané, zober posledný VIN
-                vehicle = Vehicle.query.order_by(Vehicle.id.desc()).first()
-                if not vehicle:
-                    return jsonify({"error": "No VIN found to assign DTC"}), 400
+            if not last_vehicle:
+                return jsonify({"error": "No VIN found to assign DTC"}), 400
 
-            # pridaj nový DTC k danému VIN
-            new_dtc = DTCCode(vin_id=vehicle.id, dtc_code=dtc_code)
+            new_dtc = DTCCode(vin_id=last_vehicle.id, dtc_code=dtc_code)
             db.session.add(new_dtc)
             db.session.commit()
 
             return jsonify({
                 "status": "DTC stored",
-                "vin": vehicle.vin,
+                "vin": last_vehicle.vin,
                 "dtc": dtc_code
             }), 201
-
-        else:
-            return jsonify({"error": "Unknown packet type"}), 400
 
     except Exception as e:
         return jsonify({"error": str(e)}), 500
