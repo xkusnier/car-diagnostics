@@ -51,9 +51,17 @@ def home():
 @app.route("/api/can", methods=["POST"])
 def receive_can_packet():
     """
+    VIN TEST postman:
     {
         "device_id": 1,
         "data": "4A374E453147303036343234"
+    }
+
+    
+    DTC TEST postman:
+    {
+    "device_id": 1,
+    "data": "544D424A4A374E"
     }
     """
     try:
