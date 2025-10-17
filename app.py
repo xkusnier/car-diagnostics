@@ -5,7 +5,7 @@ import os
 
 app = Flask(__name__)
 
-# ✅ Databáza
+# DATABAZA
 db_url = os.environ.get("DATABASE_URL", "sqlite:///local.db")
 if db_url.startswith("postgres://"):
     db_url = db_url.replace("postgres://", "postgresql+psycopg://", 1)
@@ -16,7 +16,7 @@ app.config["SQLALCHEMY_DATABASE_URI"] = db_url
 app.config["SQLALCHEMY_TRACK_MODIFICATIONS"] = False
 db = SQLAlchemy(app)
 
-# ✅ Modely
+# MODELY DB
 class Vehicle(db.Model):
     __tablename__ = "vehicles"
     id = db.Column(db.Integer, primary_key=True)
@@ -29,43 +29,49 @@ class DTCCode(db.Model):
     vin_id = db.Column(db.Integer, db.ForeignKey("vehicles.id"), nullable=False)
     dtc_code = db.Column(db.String(20), nullable=False)
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
+class LastVinDevice(db.Model):
+    __tablename__ = "last_vin_device"
+    id = db.Column(db.Integer, primary_key=True)
+    device_id = db.Column(db.Integer, unique=True, nullable=False)
+    last_vin_id = db.Column(db.Integer, db.ForeignKey("vehicles.id"), nullable=True)
+    updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    
 
-# ✅ Inicializácia databázy
 @app.route("/init-db")
 def init_db():
     db.create_all()
-    return jsonify({"status": "Database initialized ✅"})
+    return jsonify({"status": "Database initialized"})
 
-# ✅ Root route pre Render kontrolu
+# get na konrolu
 @app.route("/", methods=["GET"])
 def home():
     return jsonify({"status": "ok", "message": "Flask backend running 🚀"})
 
-# ✅ Endpoint na prijímanie CAN packetov
+# prijimanie packetov (zatial iba message_type= RAW_DATA)
 @app.route("/api/can", methods=["POST"])
 def receive_can_packet():
     """
-    Očakáva JSON:
     {
+        "device_id": 1,
         "data": "4A374E453147303036343234"
     }
-    Backend automaticky rozlíši VIN alebo DTC podľa dĺžky a formátu.
     """
     try:
         payload = request.get_json()
         data_hex = payload.get("data")
+        device_id = payload.get("device_id")
 
-        if not data_hex:
-            return jsonify({"error": "Missing field 'data'"}), 400
+        if not data_hex or device_id is None:
+            return jsonify({"error": "Missing 'data' or 'device_id'"}), 400
 
-        # dekóduj hex -> text
+        # dekodovanie hex -> text
         decoded_str = bytes.fromhex(data_hex).decode(errors="ignore").strip()
-
         if not decoded_str:
             return jsonify({"error": "Invalid hex data"}), 400
 
-        # Rozlíšenie typu
-        if len(decoded_str) > 15:  # typicky VIN (17 znakov)
+        # --- Rozlíšenie VIN vs DTC ---
+        if len(decoded_str) > 15:  # VIN (17 znakov) zatial docasny hardcode - treba dorobit rozlisovanie podla prvych znakov napr vwv - len skoda ma ine atd... + kontrola poctu znakov 
+                                    # -alebo externe overit ci VIN existuje, neni najlepsie solution niektore vo vindecoderi nejsu + vpodstate mi je jedno ci je vin v niakej externej db, alebo nie...
             vin = decoded_str
             vehicle = Vehicle.query.filter_by(vin=vin).first()
             if not vehicle:
@@ -73,32 +79,45 @@ def receive_can_packet():
                 db.session.add(vehicle)
                 db.session.commit()
 
-            return jsonify({
-                "status": "VIN stored",
-                "vin": vin
-            }), 201
+            # aktualizuj LASTVINDEVICE
+            state = LastVinDevice.query.filter_by(device_id=device_id).first()
+            if not state:
+                # vytvorenie device <-> vin
+                state = LastVinDevice(device_id=device_id, last_vin_id=vehicle.id)
+                db.session.add(state)
+            else:
+                # zmenenie last vin pre dany device
+                state.last_vin_id = vehicle.id
+            db.session.commit()
 
-        else:  # typicky DTC
+            return jsonify({"status": "VIN stored", "vin": vin}), 201
+
+        else:  # packet je DTC
             dtc_code = decoded_str
-            last_vehicle = Vehicle.query.order_by(Vehicle.id.desc()).first()
 
-            if not last_vehicle:
-                return jsonify({"error": "No VIN found to assign DTC"}), 400
+            # VIN, ktoremu toto DTC patri
+            state = LastVinDevice.query.filter_by(device_id=device_id).first()
+            if not state or not state.last_vin_id:
+                return jsonify({"error": "VIN not found"}), 400
 
-            new_dtc = DTCCode(vin_id=last_vehicle.id, dtc_code=dtc_code)
+            vehicle = Vehicle.query.get(state.last_vin_id)
+            if not vehicle:
+                return jsonify({"error": "VIN not found"}), 404
+
+            new_dtc = DTCCode(vin_id=vehicle.id, dtc_code=dtc_code)
             db.session.add(new_dtc)
             db.session.commit()
 
-            return jsonify({
+            return jsonify({ # FEEDBACK PRE POSTMANA
                 "status": "DTC stored",
-                "vin": last_vehicle.vin,
+                "vin": vehicle.vin,
                 "dtc": dtc_code
             }), 201
 
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
-# ✅ Zobrazenie všetkých VIN + DTC
+# VSETKO ZOBRAZ GET
 @app.route("/api/all", methods=["GET"])
 def show_all():
     vehicles = Vehicle.query.all()
