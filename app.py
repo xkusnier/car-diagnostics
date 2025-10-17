@@ -40,12 +40,12 @@ class LastVinDevice(db.Model):
 @app.route("/init-db")
 def init_db():
     db.create_all()
-    return jsonify({"status": "Database initialized"})
+    return jsonify({"status": "Database ok"})
 
 # get na konrolu
 @app.route("/", methods=["GET"])
 def home():
-    return jsonify({"status": "ok", "message": "Flask backend running 🚀"})
+    return jsonify({"status": "ok", "message": "Flask bezi"})
 
 # prijimanie packetov (zatial iba message_type= RAW_DATA)
 @app.route("/api/can", methods=["POST"])
