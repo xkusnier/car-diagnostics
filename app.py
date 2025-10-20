@@ -52,30 +52,30 @@ def home():
 
 @app.route("/api/hello", methods=["POST"]) #    Raspberry posle serveru ze je online - server mu odpovie REQUEST_VIN. - lebo vsak server nevie kto je raspbbery musi sa ohlasit prve...
 def register_device_and_request_vin():
-"""
-    Raspberry sa ohlási serveru, že je online.
-    Server mu odpovie príkazom REQUEST_VIN.
-    ---
-    tags:
-      - VIN Communication
-    parameters:
-      - in: body
-        name: body
-        required: true
-        schema:
-          type: object
-          properties:
-            device_id:
-              type: integer
-              example: 1
-    responses:
-      200:
-        description: Server žiada VIN
-        examples:
-          application/json:
-            command: REQUEST_VIN
-            message: "Hello device 1, please send me your VIN."
     """
+        Raspberry sa ohlási serveru, že je online.
+        Server mu odpovie príkazom REQUEST_VIN.
+        ---
+        tags:
+          - VIN Communication
+        parameters:
+          - in: body
+            name: body
+            required: true
+            schema:
+              type: object
+              properties:
+                device_id:
+                  type: integer
+                  example: 1
+        responses:
+          200:
+            description: Server žiada VIN
+            examples:
+              application/json:
+                command: REQUEST_VIN
+                message: "Hello device 1, please send me your VIN."
+        """
     try:
         payload = request.get_json()
         device_id = payload.get("device_id")
