@@ -1,9 +1,11 @@
 from flask import Flask, request, jsonify
 from flask_sqlalchemy import SQLAlchemy
+from flasgger import Swagger
 from datetime import datetime
 import os
 
 app = Flask(__name__)
+swagger = Swagger(app)
 
 # DATABAZA
 db_url = os.environ.get("DATABASE_URL", "sqlite:///local.db")
@@ -46,6 +48,35 @@ def init_db():
 @app.route("/", methods=["GET"])
 def home():
     return jsonify({"status": "ok", "message": "Flask bezi"})
+
+
+@app.route("/api/hello", methods=["POST"]) #    Raspberry posle serveru ze je online - server mu odpovie REQUEST_VIN. - lebo vsak server nevie kto je raspbbery musi sa ohlasit prve...
+def register_device_and_request_vin():
+    """
+{
+  "device_id": 1
+}
+    """
+    try:
+        payload = request.get_json()
+        device_id = payload.get("device_id")
+
+        if device_id is None:
+            return jsonify({"error": "Missing 'device_id'"}), 400
+
+        state = LastVinDevice.query.filter_by(device_id=device_id)
+        if not state:
+            state = LastVinDevice(device_id=device_id)
+            db.session.add(state)
+        state.updated_at = datetime.utcnow()
+        db.session.commit()
+
+        return jsonify({
+            "command": "REQUEST_VIN",
+        }), 200
+
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
 
 # prijimanie packetov (zatial iba message_type= RAW_DATA)
 @app.route("/api/can", methods=["POST"])
