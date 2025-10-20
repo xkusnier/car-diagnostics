@@ -74,7 +74,6 @@ def register_device_and_request_vin():
             examples:
               application/json:
                 command: REQUEST_VIN
-                message: "Hello device 1, please send me your VIN."
         """
     try:
         payload = request.get_json()
