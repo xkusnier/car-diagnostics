@@ -52,10 +52,29 @@ def home():
 
 @app.route("/api/hello", methods=["POST"]) #    Raspberry posle serveru ze je online - server mu odpovie REQUEST_VIN. - lebo vsak server nevie kto je raspbbery musi sa ohlasit prve...
 def register_device_and_request_vin():
-    """
-{
-  "device_id": 1
-}
+"""
+    Raspberry sa ohlási serveru, že je online.
+    Server mu odpovie príkazom REQUEST_VIN.
+    ---
+    tags:
+      - VIN Communication
+    parameters:
+      - in: body
+        name: body
+        required: true
+        schema:
+          type: object
+          properties:
+            device_id:
+              type: integer
+              example: 1
+    responses:
+      200:
+        description: Server žiada VIN
+        examples:
+          application/json:
+            command: REQUEST_VIN
+            message: "Hello device 1, please send me your VIN."
     """
     try:
         payload = request.get_json()
@@ -82,18 +101,26 @@ def register_device_and_request_vin():
 @app.route("/api/can", methods=["POST"])
 def receive_can_packet():
     """
-    VIN TEST postman:
-    {
-        "device_id": 1,
-        "data": "4A374E453147303036343234"
-    }
-
-    
-    DTC TEST postman:
-    {
-    "device_id": 1,
-    "data": "544D424A4A374E"
-    }
+    Raspberry odošle VIN alebo DTC dáta na server.
+    ---
+    tags:
+      - VIN Communication
+    parameters:
+      - in: body
+        name: body
+        required: true
+        schema:
+          type: object
+          properties:
+            device_id:
+              type: integer
+              example: 1
+            data:
+              type: string
+              example: "5756575A5A5A314A5A3257323337393733"
+    responses:
+      201:
+        description: Dáta boli prijaté a spracované
     """
     try:
         payload = request.get_json()
@@ -159,6 +186,15 @@ def receive_can_packet():
 # VSETKO ZOBRAZ GET
 @app.route("/api/all", methods=["GET"])
 def show_all():
+    """
+    Zobrazí všetky VIN a priradené DTC kódy.
+    ---
+    tags:
+      - VIN Communication
+    responses:
+      200:
+        description: Zoznam VIN a DTC
+    """
     vehicles = Vehicle.query.all()
     data = []
     for v in vehicles:
