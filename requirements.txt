@@ -4,3 +4,4 @@ gunicorn==21.2.0
 psycopg[binary]==3.2.10
 python-dotenv==1.0.1
 requests==2.32.3
+flasgger==0.9.7b2
