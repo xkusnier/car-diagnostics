@@ -197,13 +197,12 @@ def vin_info_rapidapi():
         name: vin
         type: string
         required: true
-        description: VIN číslo vozidla
         example: "TMBHT61Z0B8037970"
     responses:
       200:
         description: Úspešne načítané údaje o vozidle
-      400:
-        description: VIN chýba alebo je neplatné
+      404:
+        description: VIN not found
     """
     try:
         vin = request.args.get("vin")
@@ -212,23 +211,28 @@ def vin_info_rapidapi():
 
         rapid_key = os.getenv("RAPIDAPI_KEY")
         if not rapid_key:
-            return jsonify({"error": "Missing RAPIDAPI_KEY environment variable"}), 500
+            return jsonify({"error": "Missing RAPIDAPI_KEY env variable"}), 500
 
         url = "https://vin-decoder-1.p.rapidapi.com/v1/decode"
-        querystring = {"vin": vin}
-
+        querystring = {"vin": vin, "format": "json"}
         headers = {
             "X-RapidAPI-Key": rapid_key,
             "X-RapidAPI-Host": "vin-decoder-1.p.rapidapi.com"
         }
 
         response = requests.get(url, headers=headers, params=querystring, timeout=10)
+
+        if response.status_code == 404:
+            return jsonify({"error": "VIN not found in RapidAPI database"}), 404
         if response.status_code != 200:
-            return jsonify({"error": "API error", "status": response.status_code}), response.status_code
+            return jsonify({
+                "error": "API error",
+                "status": response.status_code,
+                "details": response.text
+            }), response.status_code
 
         data = response.json()
-        # Skús vybrať najčastejšie polia – záleží od odpovede API
-        result = data.get("specification", {})
+        result = data.get("specification") or {}
         simplified = {
             "vin": vin,
             "make": result.get("make"),
