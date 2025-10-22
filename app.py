@@ -184,6 +184,68 @@ def receive_can_packet():
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
+
+@app.route("/api/vininfo2", methods=["GET"])
+def vin_info_rapidapi():
+    """
+    Dekódovanie VIN pomocou RapidAPI VIN Decoder (100 free calls/mes)
+    ---
+    tags:
+      - VIN Information (RapidAPI)
+    parameters:
+      - in: query
+        name: vin
+        type: string
+        required: true
+        description: VIN číslo vozidla
+        example: "TMBHT61Z0B8037970"
+    responses:
+      200:
+        description: Úspešne načítané údaje o vozidle
+      400:
+        description: VIN chýba alebo je neplatné
+    """
+    try:
+        vin = request.args.get("vin")
+        if not vin:
+            return jsonify({"error": "Missing 'vin' parameter"}), 400
+
+        rapid_key = os.getenv("RAPIDAPI_KEY")
+        if not rapid_key:
+            return jsonify({"error": "Missing RAPIDAPI_KEY environment variable"}), 500
+
+        url = "https://vin-decoder-1.p.rapidapi.com/v1/decode"
+        querystring = {"vin": vin}
+
+        headers = {
+            "X-RapidAPI-Key": rapid_key,
+            "X-RapidAPI-Host": "vin-decoder-1.p.rapidapi.com"
+        }
+
+        response = requests.get(url, headers=headers, params=querystring, timeout=10)
+        if response.status_code != 200:
+            return jsonify({"error": "API error", "status": response.status_code}), response.status_code
+
+        data = response.json()
+        # Skús vybrať najčastejšie polia – záleží od odpovede API
+        result = data.get("specification", {})
+        simplified = {
+            "vin": vin,
+            "make": result.get("make"),
+            "model": result.get("model"),
+            "year": result.get("year"),
+            "engine": result.get("engine"),
+            "transmission": result.get("transmission"),
+            "trim": result.get("trim"),
+            "body_type": result.get("body_type")
+        }
+
+        return jsonify({"status": "success", "source": "rapidapi", "data": simplified}), 200
+
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
 @app.route("/api/vininfo", methods=["GET"])
 def vin_info():
     """
