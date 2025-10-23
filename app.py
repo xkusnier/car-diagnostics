@@ -147,6 +147,55 @@ def load_dtc_codes_from_csv():
 
 
 
+@app.route("/api/dtc-description", methods=["POST"])
+def get_dtc_description():
+    """
+    Získa textový popis DTC kódu z databázy.
+    ---
+    tags:
+      - DTC Codes
+    parameters:
+      - in: body
+        name: body
+        required: true
+        schema:
+          type: object
+          properties:
+            dtc_code:
+              type: string
+              example: "P0263"
+    responses:
+      200:
+        description: Popis DTC kódu
+      404:
+        description: Kód neexistuje v databáze
+    """
+    try:
+        payload = request.get_json()
+        dtc_code = payload.get("dtc_code")
+
+        if not dtc_code:
+            return jsonify({"error": "Missing 'dtc_code' parameter"}), 400
+
+        # Vyhľadanie v databáze (case-insensitive)
+        record = DtcCodeMeaning.query.filter(
+            db.func.lower(DtcCodeMeaning.dtc_code) == dtc_code.lower()
+        ).first()
+
+        if not record:
+            return jsonify({
+                "status": "not_found",
+                "message": f"DTC code '{dtc_code}' not found in database."
+            }), 404
+
+        return jsonify({
+            "status": "success",
+            "dtc_code": record.dtc_code,
+            "description": record.dtc_description
+        }), 200
+
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
 
 
 
