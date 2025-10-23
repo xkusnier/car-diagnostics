@@ -21,6 +21,28 @@ app.config["SQLALCHEMY_TRACK_MODIFICATIONS"] = False
 db = SQLAlchemy(app)
 
 # MODELY DB
+class User(db.Model):
+    __tablename__ = "users"
+    id = db.Column(db.Integer, primary_key=True)
+    password = db.Column(db.String(255), nullable=False)
+    role = db.Column(db.String(50), default="user")
+    email = db.Column(db.String(120), unique=True, nullable=False)
+    devices = db.relationship("Device", backref="user", lazy=True, cascade="all, delete")
+
+class Device(db.Model):
+    __tablename__ = "device"
+    id = db.Column(db.Integer, primary_key=True)
+    user_id = db.Column(db.Integer, db.ForeignKey("users.id"), nullable=True)
+    status = db.Column(db.Boolean, default=False)  # True = online
+    link = db.relationship("DeviceVehicle", backref="device", lazy=True, cascade="all, delete")
+
+class DeviceVehicle(db.Model):
+    __tablename__ = "device_vehicle"
+    id = db.Column(db.Integer, primary_key=True)
+    device_id = db.Column(db.Integer, db.ForeignKey("device.id"), nullable=False)
+    last_vin_id = db.Column(db.Integer, db.ForeignKey("vehicles.id"), nullable=True)
+    updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
 class Vehicle(db.Model):
     __tablename__ = "vehicles"
     id = db.Column(db.Integer, primary_key=True)
@@ -33,13 +55,6 @@ class DTCCode(db.Model):
     vin_id = db.Column(db.Integer, db.ForeignKey("vehicles.id"), nullable=False)
     dtc_code = db.Column(db.String(20), nullable=False)
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
-class LastVinDevice(db.Model):
-    __tablename__ = "last_vin_device"
-    id = db.Column(db.Integer, primary_key=True)
-    device_id = db.Column(db.Integer, unique=True, nullable=False)
-    last_vin_id = db.Column(db.Integer, db.ForeignKey("vehicles.id"), nullable=True)
-    updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
-    
 
 @app.route("/init-db")
 def init_db():
@@ -84,9 +99,9 @@ def register_device_and_request_vin():
         if device_id is None:
             return jsonify({"error": "Missing 'device_id'"}), 400
 
-        state = LastVinDevice.query.filter_by(device_id=device_id)
+        state = DeviceVehicle.query.filter_by(device_id=device_id).first()
         if not state:
-            state = LastVinDevice(device_id=device_id)
+            state = DeviceVehicle(device_id=device_id)
             db.session.add(state)
         state.updated_at = datetime.utcnow()
         db.session.commit()
@@ -147,10 +162,10 @@ def receive_can_packet():
                 db.session.commit()
 
             # aktualizuj LASTVINDEVICE
-            state = LastVinDevice.query.filter_by(device_id=device_id).first()
+            state = DeviceVehicle.query.filter_by(device_id=device_id).first()
             if not state:
                 # vytvorenie device <-> vin
-                state = LastVinDevice(device_id=device_id, last_vin_id=vehicle.id)
+                state = DeviceVehicle(device_id=device_id, last_vin_id=vehicle.id)
                 db.session.add(state)
             else:
                 # zmenenie last vin pre dany device
@@ -163,7 +178,7 @@ def receive_can_packet():
             dtc_code = decoded_str
 
             # VIN, ktoremu toto DTC patri
-            state = LastVinDevice.query.filter_by(device_id=device_id).first()
+            state = DeviceVehicle.query.filter_by(device_id=device_id).first()
             if not state or not state.last_vin_id:
                 return jsonify({"error": "VIN not found"}), 400
 
