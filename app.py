@@ -14,84 +14,6 @@ import requests
 from io import StringIO
 from flask import jsonify
 
-@app.route("/api/load-dtc-codes", methods=["POST"])
-def load_dtc_codes_from_csv():
-    """
-    Načíta DTC kódy z CSV súboru (napr. uloženého na GitHube) a uloží ich do databázy.
-    ---
-    tags:
-      - DTC Codes
-    parameters:
-      - in: body
-        name: body
-        required: true
-        schema:
-          type: object
-          properties:
-            csv_url:
-              type: string
-              example: "https://raw.githubusercontent.com/user/repo/main/dtc_codes.csv"
-    responses:
-      200:
-        description: DTC kódy boli úspešne nahraté do databázy
-    """
-    try:
-        payload = request.get_json()
-        csv_url = payload.get("csv_url")
-
-        if not csv_url:
-            return jsonify({"error": "Missing 'csv_url' parameter"}), 400
-
-        # 🔹 Stiahni CSV z GitHubu
-        response = requests.get(csv_url)
-        if response.status_code != 200:
-            return jsonify({"error": f"Failed to fetch CSV: {response.status_code}"}), 400
-
-        csv_text = response.text
-        csv_reader = csv.reader(StringIO(csv_text))
-        header = next(csv_reader, None)  # preskočí hlavičku
-
-        inserted = 0
-        skipped = 0
-
-        for row in csv_reader:
-            if len(row) < 2:
-                continue
-
-            dtc_code = row[0].strip().replace('"', '')
-            dtc_description = row[1].strip().replace('"', '')
-
-            # 🔍 Skontroluj, či DTC kód už v DB existuje
-            existing = db.session.execute(
-                db.text("SELECT id FROM dtc_codes_meaning WHERE dtc_code = :code"),
-                {"code": dtc_code}
-            ).fetchone()
-
-            if existing:
-                skipped += 1
-                continue
-
-            # 🔸 Vlož nový záznam
-            db.session.execute(
-                db.text("""
-                    INSERT INTO dtc_codes_meaning (dtc_code, dtc_description)
-                    VALUES (:code, :desc)
-                """),
-                {"code": dtc_code, "desc": dtc_description}
-            )
-            inserted += 1
-
-        db.session.commit()
-
-        return jsonify({
-            "status": "success",
-            "inserted": inserted,
-            "skipped_existing": skipped
-        }), 200
-
-    except Exception as e:
-        db.session.rollback()
-        return jsonify({"error": str(e)}), 500
 
 
 # DATABAZA
@@ -150,6 +72,83 @@ def init_db():
 @app.route("/", methods=["GET"])
 def home():
     return jsonify({"status": "ok", "message": "Flask bezi"})
+
+# --- DTC CODES DATABASE MODEL ---
+class DtcCodeMeaning(db.Model):
+    __tablename__ = "dtc_codes_meaning"
+    id = db.Column(db.Integer, primary_key=True)
+    dtc_code = db.Column(db.String(20), unique=True, nullable=False)
+    dtc_description = db.Column(db.Text, nullable=True)
+
+@app.route("/api/load-dtc-codes", methods=["POST"])
+def load_dtc_codes_from_csv():
+    """
+    Načíta DTC kódy z CSV súboru (napr. uloženého na GitHube) a uloží ich do databázy.
+    ---
+    tags:
+      - DTC Codes
+    parameters:
+      - in: body
+        name: body
+        required: true
+        schema:
+          type: object
+          properties:
+            csv_url:
+              type: string
+              example: "https://raw.githubusercontent.com/xkusnier/car-diagnostics/main/dtc_converted.csv"
+    responses:
+      200:
+        description: DTC kódy boli úspešne nahraté do databázy
+    """
+    try:
+        payload = request.get_json()
+        csv_url = payload.get("csv_url")
+
+        if not csv_url:
+            return jsonify({"error": "Missing 'csv_url' parameter"}), 400
+
+        # ✅ Stiahni CSV z GitHubu (RAW link)
+        response = requests.get(csv_url)
+        if response.status_code != 200:
+            return jsonify({"error": f"Failed to fetch CSV: {response.status_code}"}), 400
+
+        csv_text = response.text
+        csv_reader = csv.reader(StringIO(csv_text))
+
+        inserted, skipped = 0, 0
+
+        for row in csv_reader:
+            if len(row) < 2:
+                continue
+
+            dtc_code = row[0].strip()
+            dtc_description = row[1].strip()
+
+            # ✅ Skontroluj, či DTC už existuje
+            if DtcCodeMeaning.query.filter_by(dtc_code=dtc_code).first():
+                skipped += 1
+                continue
+
+            db.session.add(DtcCodeMeaning(dtc_code=dtc_code, dtc_description=dtc_description))
+            inserted += 1
+
+        db.session.commit()
+
+        return jsonify({
+            "status": "success",
+            "inserted": inserted,
+            "skipped_existing": skipped
+        }), 200
+
+    except Exception as e:
+        db.session.rollback()
+        return jsonify({"error": str(e)}), 500
+
+
+
+
+
 
 
 @app.route("/api/hello", methods=["POST"]) #    Raspberry posle serveru ze je online - server mu odpovie REQUEST_VIN. - lebo vsak server nevie kto je raspbbery musi sa ohlasit prve...
