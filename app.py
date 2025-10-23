@@ -200,72 +200,8 @@ def receive_can_packet():
         return jsonify({"error": str(e)}), 500
 
 
-@app.route("/api/vininfo2", methods=["GET"])
-def vin_info_rapidapi():
-    """
-    Dekódovanie VIN pomocou RapidAPI VIN Decoder (100 free calls/mes)
-    ---
-    tags:
-      - VIN Information (RapidAPI)
-    parameters:
-      - in: query
-        name: vin
-        type: string
-        required: true
-        example: "TMBHT61Z0B8037970"
-    responses:
-      200:
-        description: Úspešne načítané údaje o vozidle
-      404:
-        description: VIN not found
-    """
-    try:
-        vin = request.args.get("vin")
-        if not vin:
-            return jsonify({"error": "Missing 'vin' parameter"}), 400
 
-        rapid_key = os.getenv("RAPIDAPI_KEY")
-        if not rapid_key:
-            return jsonify({"error": "Missing RAPIDAPI_KEY env variable"}), 500
-
-        url = "https://vin-decoder-1.p.rapidapi.com/v1/decode"
-        querystring = {"vin": vin, "format": "json"}
-        headers = {
-            "X-RapidAPI-Key": rapid_key,
-            "X-RapidAPI-Host": "vin-decoder-1.p.rapidapi.com"
-        }
-
-        response = requests.get(url, headers=headers, params=querystring, timeout=10)
-
-        if response.status_code == 404:
-            return jsonify({"error": "VIN not found in RapidAPI database"}), 404
-        if response.status_code != 200:
-            return jsonify({
-                "error": "API error",
-                "status": response.status_code,
-                "details": response.text
-            }), response.status_code
-
-        data = response.json()
-        result = data.get("specification") or {}
-        simplified = {
-            "vin": vin,
-            "make": result.get("make"),
-            "model": result.get("model"),
-            "year": result.get("year"),
-            "engine": result.get("engine"),
-            "transmission": result.get("transmission"),
-            "trim": result.get("trim"),
-            "body_type": result.get("body_type")
-        }
-
-        return jsonify({"status": "success", "source": "rapidapi", "data": simplified}), 200
-
-    except Exception as e:
-        return jsonify({"error": str(e)}), 500
-
-
-@app.route("/api/vininfo", methods=["GET"])
+@app.route("/api/vininfo", methods=["POST"])
 def vin_info():
     """
     Získa základné údaje o vozidle podľa VIN (Auto.dev API)
@@ -273,28 +209,31 @@ def vin_info():
     tags:
       - VIN Information
     parameters:
-      - in: query
-        name: vin
-        type: string
+      - in: body
+        name: body
         required: true
-        description: VIN číslo vozidla
-        example: "3GCUDHEL3NG668790"
+        schema:
+          type: object
+          properties:
+            vin:
+              type: string
+              example: "3GCUDHEL3NG668790"
     responses:
       200:
         description: Úspešne načítané údaje o vozidle
       400:
         description: VIN chýba alebo je neplatné
-      500:
-        description: Chyba pri volaní API alebo servera
     """
     try:
-        vin = request.args.get("vin")
+        payload = request.get_json()
+        vin = payload.get("vin")
+
         if not vin:
-            return jsonify({"error": "Missing 'vin' parameter"}), 400
+            return jsonify({"error": "Missing 'vin' in body"}), 400
 
         api_key = os.getenv("AUTODEV_API_KEY")
         if not api_key:
-            return jsonify({"error": "Missing AUTODEV_API_KEY env variable"}), 500
+            return jsonify({"error": "Missing AUTODEV_API_KEY"}), 500
 
         url = f"https://api.auto.dev/vin/{vin}"
         headers = {
@@ -304,15 +243,10 @@ def vin_info():
 
         response = requests.get(url, headers=headers, timeout=10)
         if response.status_code != 200:
-            return jsonify({
-                "error": f"Auto.dev API returned {response.status_code}",
-                "details": response.text
-            }), response.status_code
+            return jsonify({"error": "VIN not found"}), response.status_code
 
         data = response.json()
-
-        # Extrahovanie relevantných údajov
-        simplified = {
+        return jsonify({
             "vin": vin,
             "make": data.get("make"),
             "model": data.get("model"),
@@ -321,9 +255,7 @@ def vin_info():
             "engine": data.get("engine"),
             "transmission": data.get("transmission"),
             "body_type": data.get("body_type")
-        }
-
-        return jsonify({"status": "success", "data": simplified}), 200
+        }), 200
 
     except Exception as e:
         return jsonify({"error": str(e)}), 500
