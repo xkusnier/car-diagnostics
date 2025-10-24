@@ -4,7 +4,8 @@ from flasgger import Swagger
 from datetime import datetime
 import os
 import requests
-
+from flask_cors import CORS
+CORS(app)
 
 app = Flask(__name__)
 swagger = Swagger(app)
