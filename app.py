@@ -5,16 +5,15 @@ from datetime import datetime
 import os
 import requests
 from flask_cors import CORS
-CORS(app)
-
-app = Flask(__name__)
-swagger = Swagger(app)
-
 import csv
 import requests
 from io import StringIO
 from flask import jsonify
 
+
+app = Flask(__name__)
+CORS(app)
+swagger = Swagger(app)
 
 
 # DATABAZA
