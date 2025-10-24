@@ -10,6 +10,7 @@ import requests
 from io import StringIO
 from flask import jsonify
 from datetime import datetime, timedelta
+from flask_jwt_extended import JWTManager, create_access_token, jwt_required, get_jwt_identity  # Overenie importu
 
 app = Flask(__name__)
 CORS(app)
