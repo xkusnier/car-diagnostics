@@ -15,6 +15,10 @@ app = Flask(__name__)
 CORS(app)
 swagger = Swagger(app)
 
+# Konfigurácia JWT
+app.config["JWT_SECRET_KEY"] = os.environ.get("JWT_SECRET_KEY", "your-secret-key")  # Nahraďte vlastným tajným kľúčom
+app.config["JWT_ACCESS_TOKEN_EXPIRES"] = timedelta(hours=1)  # Token platný 1 hodinu
+jwt = JWTManager(app)
 
 # DATABAZA
 db_url = os.environ.get("DATABASE_URL", "sqlite:///local.db")
@@ -79,6 +83,54 @@ class DtcCodeMeaning(db.Model):
     id = db.Column(db.Integer, primary_key=True)
     dtc_code = db.Column(db.String(20), unique=True, nullable=False)
     dtc_description = db.Column(db.Text, nullable=True)
+# Endpoint pre prihlásenie
+@app.route("/api/login", methods=["POST"])
+def login():
+    """
+    Prihlásenie používateľa a vrátenie JWT tokenu.
+    ---
+    tags:
+      - Authentication
+    parameters:
+      - in: body
+        name: body
+        required: true
+        schema:
+          type: object
+          properties:
+            email:
+              type: string
+              example: "user@example.com"
+            password:
+              type: string
+              example: "password123"
+    responses:
+      200:
+        description: Úspešné prihlásenie s JWT tokenom
+      401:
+        description: Neplatné prihlasovacie údaje
+    """
+    try:
+        data = request.get_json()
+        email = data.get("email")
+        password = data.get("password")
+
+        if not email or not password:
+            return jsonify({"error": "Missing email or password"}), 400
+
+        user = User.query.filter_by(email=email).first()
+        if not user or user.password != password:  # Pre jednoduchosť porovnávam heslo priamo (v praxi použi hashovanie, napr. bcrypt)
+            return jsonify({"error": "Invalid credentials"}), 401
+
+        # Generovanie JWT tokenu
+        access_token = create_access_token(identity={"id": user.id, "email": user.email, "role": user.role})
+        return jsonify({"status": "success", "access_token": access_token}), 200
+
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
+
 
 @app.route("/api/load-dtc-codes", methods=["POST"])
 def load_dtc_codes_from_csv():
