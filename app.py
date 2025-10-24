@@ -250,7 +250,27 @@ def get_dtc_description():
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
+@app.route("/api/register", methods=["POST"])
+def register():
+    try:
+        data = request.get_json()
+        email = data.get("email")
+        password = data.get("password")
 
+        if not email or not password:
+            return jsonify({"error": "Missing email or password"}), 400
+
+        if User.query.filter_by(email=email).first():
+            return jsonify({"error": "Email already exists"}), 409
+
+        new_user = User(email=email, password=password, role="user")
+        db.session.add(new_user)
+        db.session.commit()
+
+        return jsonify({"status": "success", "message": "User registered"}), 201
+    except Exception as e:
+        db.session.rollback()
+        return jsonify({"error": str(e)}), 500
 
 
 @app.route("/api/hello", methods=["POST"]) #    Raspberry posle serveru ze je online - server mu odpovie REQUEST_VIN. - lebo vsak server nevie kto je raspbbery musi sa ohlasit prve...
