@@ -333,14 +333,13 @@ def receive_can_packet():
         return jsonify({"error": str(e)}), 500
 
 
-
-@app.route("/api/vininfo", methods=["POST"])
-def vin_info():
+@app.route("/api/vindecode", methods=["POST"])
+def decode_vin_apiverve():
     """
-    Získa základné údaje o vozidle podľa VIN (Auto.dev API)
+    Dekóduje VIN pomocou apiverve VIN Decoder API.
     ---
     tags:
-      - VIN Information
+      - VIN Information (apiverve)
     parameters:
       - in: body
         name: body
@@ -350,12 +349,14 @@ def vin_info():
           properties:
             vin:
               type: string
-              example: "3GCUDHEL3NG668790"
+              example: "WVWZZZ1JZ2W237973"
     responses:
       200:
-        description: Úspešne načítané údaje o vozidle
+        description: Úspech
       400:
-        description: VIN chýba alebo je neplatné
+        description: Chýba VIN
+      500:
+        description: Chyba pri volaní externej služby
     """
     try:
         payload = request.get_json()
@@ -364,22 +365,31 @@ def vin_info():
         if not vin:
             return jsonify({"error": "Missing 'vin' in body"}), 400
 
-        api_key = os.getenv("AUTODEV_API_KEY")
+        api_key = os.getenv("VINDECODER_API_KEY")
         if not api_key:
-            return jsonify({"error": "Missing AUTODEV_API_KEY"}), 500
+            return jsonify({"error": "Missing VINDECODER_API_KEY env var on server"}), 500
 
-        url = f"https://api.auto.dev/vin/{vin}"
+        url = "https://api.apiverve.com/v1/vindecoder"
         headers = {
-            "Authorization": f"Bearer {api_key}",
-            "Accept": "application/json"
+            "Content-Type": "application/json",
+            "x-api-key": api_key,
+        }
+        body = {
+            "vin": vin
         }
 
-        response = requests.get(url, headers=headers, timeout=10)
-        if response.status_code != 200:
-            return jsonify({"error": "VIN not found"}), response.status_code
+        external_resp = requests.post(url, json=body, headers=headers, timeout=10)
 
-        data = response.json()
-        return jsonify({
+        if external_resp.status_code != 200:
+            return jsonify({
+                "error": "VIN decoder API error",
+                "status": external_resp.status_code,
+                "details": external_resp.text
+            }), external_resp.status_code
+
+        data = external_resp.json()
+
+        cleaned = {
             "vin": vin,
             "make": data.get("make"),
             "model": data.get("model"),
@@ -387,7 +397,16 @@ def vin_info():
             "trim": data.get("trim"),
             "engine": data.get("engine"),
             "transmission": data.get("transmission"),
-            "body_type": data.get("body_type")
+            "driveType": data.get("driveType"),
+            "fuelType": data.get("fuelType"),
+            "bodyStyle": data.get("bodyStyle")
+        }
+
+        return jsonify({
+            "status": "success",
+            "source": "apiverve",
+            "data": cleaned,
+            "raw": data  # necháš tam aj surové dáta pre debugging, môžeš zmazať neskôr
         }), 200
 
     except Exception as e:
