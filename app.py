@@ -340,23 +340,6 @@ def decode_vin_apiverve():
     ---
     tags:
       - VIN Information (apiverve)
-    parameters:
-      - in: body
-        name: body
-        required: true
-        schema:
-          type: object
-          properties:
-            vin:
-              type: string
-              example: "WVWZZZ1JZ2W237973"
-    responses:
-      200:
-        description: Úspech
-      400:
-        description: Chýba VIN
-      500:
-        description: Chyba pri volaní externej služby
     """
     try:
         payload = request.get_json()
@@ -369,25 +352,26 @@ def decode_vin_apiverve():
         if not api_key:
             return jsonify({"error": "Missing VINDECODER_API_KEY env var on server"}), 500
 
-        url = "https://api.apiverve.com/v1/vindecoder"
+        # ✅ Apiverve VIN Decoder API používa GET
+        url = f"https://api.apiverve.com/v1/vindecoder?vin={vin}"
         headers = {
-            "Content-Type": "application/json",
-            "x-api-key": api_key,
-        }
-        body = {
-            "vin": vin
+            "X-API-Key": api_key
         }
 
-        external_resp = requests.post(url, json=body, headers=headers, timeout=10)
+        response = requests.get(url, headers=headers, timeout=10)
 
-        if external_resp.status_code != 200:
+        if response.status_code != 200:
             return jsonify({
                 "error": "VIN decoder API error",
-                "status": external_resp.status_code,
-                "details": external_resp.text
-            }), external_resp.status_code
+                "status": response.status_code,
+                "details": response.text
+            }), response.status_code
 
-        data = external_resp.json()
+        data = response.json()
+
+        # Väčšina Apiverve API má štruktúru: {"status":"success","data": {...}}
+        if "data" in data:
+            data = data["data"]
 
         cleaned = {
             "vin": vin,
@@ -405,12 +389,12 @@ def decode_vin_apiverve():
         return jsonify({
             "status": "success",
             "source": "apiverve",
-            "data": cleaned,
-            "raw": data  # necháš tam aj surové dáta pre debugging, môžeš zmazať neskôr
+            "data": cleaned
         }), 200
 
     except Exception as e:
         return jsonify({"error": str(e)}), 500
+
 
 
 # VSETKO ZOBRAZ GET
