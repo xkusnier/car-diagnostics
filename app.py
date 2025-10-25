@@ -273,31 +273,31 @@ def register():
         return jsonify({"error": str(e)}), 500
 
 
-@app.route("/api/hello", methods=["POST"]) #    Raspberry posle serveru ze je online - server mu odpovie REQUEST_VIN. - lebo vsak server nevie kto je raspbbery musi sa ohlasit prve...
+@app.route("/api/hello", methods=["POST"])
 def register_device_and_request_vin():
     """
-        Raspberry sa ohlási serveru, že je online.
-        Server mu odpovie príkazom REQUEST_VIN.
-        ---
-        tags:
-          - VIN Communication
-        parameters:
-          - in: body
-            name: body
-            required: true
-            schema:
-              type: object
-              properties:
-                device_id:
-                  type: integer
-                  example: 1
-        responses:
-          200:
-            description: Server žiada VIN
-            examples:
-              application/json:
-                command: REQUEST_VIN
-        """
+    Raspberry sa ohlási serveru, že je online.
+    Server mu odpovie príkazom REQUEST_VIN.
+    ---
+    tags:
+      - VIN Communication
+    parameters:
+      - in: body
+        name: body
+        required: true
+        schema:
+          type: object
+          properties:
+            device_id:
+              type: integer
+              example: 1
+    responses:
+      200:
+        description: Server žiada VIN
+        examples:
+          application/json:
+            command: REQUEST_VIN
+    """
     try:
         payload = request.get_json()
         device_id = payload.get("device_id")
@@ -305,6 +305,14 @@ def register_device_and_request_vin():
         if device_id is None:
             return jsonify({"error": "Missing 'device_id'"}), 400
 
+        # ✅ Ak device neexistuje, vytvor ho
+        device = Device.query.get(device_id)
+        if not device:
+            device = Device(id=device_id)
+            db.session.add(device)
+            db.session.commit()
+
+        # 🔄 Teraz už môžeš vytvoriť DeviceVehicle bez FK chyby
         state = DeviceVehicle.query.filter_by(device_id=device_id).first()
         if not state:
             state = DeviceVehicle(device_id=device_id)
@@ -312,12 +320,12 @@ def register_device_and_request_vin():
         state.updated_at = datetime.utcnow()
         db.session.commit()
 
-        return jsonify({
-            "command": "REQUEST_VIN",
-        }), 200
+        return jsonify({"command": "REQUEST_VIN"}), 200
 
     except Exception as e:
+        db.session.rollback()
         return jsonify({"error": str(e)}), 500
+
 
 # prijimanie packetov (zatial iba message_type= RAW_DATA)
 @app.route("/api/can", methods=["POST"])
