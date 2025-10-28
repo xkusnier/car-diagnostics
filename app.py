@@ -329,7 +329,6 @@ def heartbeat():
         return jsonify({"error": str(e)}), 500
 
 @app.route("/api/trigger", methods=["POST"])
-@jwt_required()
 def trigger_command():
     """
     Admin pošle príkaz na RPi
