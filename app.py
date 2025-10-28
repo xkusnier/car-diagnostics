@@ -39,7 +39,7 @@ class User(db.Model):
     password = db.Column(db.String(255), nullable=False)
     role = db.Column(db.String(50), default="user")
     email = db.Column(db.String(120), unique=True, nullable=False)
-    devices = db.relationship("Device", backref="user", lazy=True, cascade="all, delete")
+    devices = db.relationship("Device", backref="user", lazy=True, cascade="all, delete")    
 
 class Device(db.Model):
     __tablename__ = "device"
@@ -66,6 +66,14 @@ class DTCCode(db.Model):
     id = db.Column(db.Integer, primary_key=True)
     vin_id = db.Column(db.Integer, db.ForeignKey("vehicles.id"), nullable=False)
     dtc_code = db.Column(db.String(20), nullable=False)
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+# PRIDAJ SEM – hneď za class DTCCode(db.Model): ...
+class PendingCommand(db.Model):
+    __tablename__ = "pending_commands"
+    id = db.Column(db.Integer, primary_key=True)
+    device_id = db.Column(db.Integer, db.ForeignKey("device.id"), nullable=False)
+    command = db.Column(db.String(50), nullable=False)
+    executed = db.Column(db.Boolean, default=False)
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
 
 @app.route("/init-db")
@@ -272,61 +280,88 @@ def register():
         db.session.rollback()
         return jsonify({"error": str(e)}), 500
 
-
-@app.route("/api/hello", methods=["POST"])
-def register_device_and_request_vin():
+@app.route("/api/heartbeat", methods=["POST"])
+def heartbeat():
     """
-    Raspberry sa ohlási serveru, že je online.
-    Server mu odpovie príkazom REQUEST_VIN.
+    RPi sa hlási každých 30s. Server vráti príkaz (ak je).
     ---
     tags:
-      - VIN Communication
+      - Device
     parameters:
       - in: body
         name: body
-        required: true
         schema:
-          type: object
           properties:
-            device_id:
-              type: integer
-              example: 1
+            device_id: {type: integer, example: 1}
     responses:
       200:
-        description: Server žiada VIN
+        description: OK alebo príkaz
         examples:
           application/json:
-            command: REQUEST_VIN
+            status: ok
+          application/json:
+            command: GET_VIN
     """
     try:
-        payload = request.get_json()
-        device_id = payload.get("device_id")
+        data = request.get_json()
+        device_id = data.get("device_id")
+        if not device_id:
+            return jsonify({"error": "missing device_id"}), 400
 
-        if device_id is None:
-            return jsonify({"error": "Missing 'device_id'"}), 400
-
-        # ✅ Ak device neexistuje, vytvor ho
+        # Aktualizuj device
         device = Device.query.get(device_id)
         if not device:
-            device = Device(id=device_id)
+            device = Device(id=device_id, status=True)
             db.session.add(device)
-            db.session.commit()
-
-        # 🔄 Teraz už môžeš vytvoriť DeviceVehicle bez FK chyby
-        state = DeviceVehicle.query.filter_by(device_id=device_id).first()
-        if not state:
-            state = DeviceVehicle(device_id=device_id)
-            db.session.add(state)
-        state.updated_at = datetime.utcnow()
+        else:
+            device.status = True
         db.session.commit()
 
-        return jsonify({"command": "REQUEST_VIN"}), 200
+        # Skontroluj čakajúci príkaz
+        cmd = PendingCommand.query.filter_by(device_id=device_id, executed=False).first()
+        if cmd:
+            cmd.executed = True
+            db.session.commit()
+            return jsonify({"command": cmd.command}), 200
 
+        return jsonify({"status": "ok"}), 200
     except Exception as e:
-        db.session.rollback()
         return jsonify({"error": str(e)}), 500
 
+@app.route("/api/trigger", methods=["POST"])
+@jwt_required()
+def trigger_command():
+    """
+    Admin pošle príkaz na RPi
+    ---
+    tags:
+      - Admin
+    security:
+      - Bearer: []
+    parameters:
+      - in: body
+        name: body
+        schema:
+          properties:
+            device_id: {type: integer, example: 1}
+            command: {type: string, enum: [GET_VIN, GET_DTCS_PERM, GET_DTCS_PEND, GET_RPM, GET_TEMP]}
+    responses:
+      200: {description: Príkaz zaradený}
+    """
+    try:
+        data = request.get_json()
+        device_id = data.get("device_id")
+        command = data.get("command")
 
+        if command not in ["GET_VIN", "GET_DTCS_PERM", "GET_DTCS_PEND", "GET_RPM", "GET_TEMP"]:
+            return jsonify({"error": "invalid command"}), 400
+
+        cmd = PendingCommand(device_id=device_id, command=command)
+        db.session.add(cmd)
+        db.session.commit()
+        return jsonify({"status": "queued", "command": command}), 200
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
 # prijimanie packetov (zatial iba message_type= RAW_DATA)
 @app.route("/api/can", methods=["POST"])
 def receive_can_packet():
