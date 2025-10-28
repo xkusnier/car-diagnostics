@@ -31,7 +31,7 @@ elif db_url.startswith("postgresql://") and "+psycopg" not in db_url:
 app.config["SQLALCHEMY_DATABASE_URI"] = db_url
 app.config["SQLALCHEMY_TRACK_MODIFICATIONS"] = False
 db = SQLAlchemy(app)
-
+## toto je test ci funguje git
 # MODELY DB
 class User(db.Model):
     __tablename__ = "users"
