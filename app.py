@@ -365,7 +365,7 @@ def trigger_command():
 @app.route("/api/can", methods=["POST"])
 def receive_can_packet():
     """
-    Raspberry odošle VIN alebo DTC dáta na server.
+    Raspberry odošle VIN alebo DTC dáta ako TEXT (už dekódované na RPi).
     ---
     tags:
       - VIN Communication
@@ -379,74 +379,84 @@ def receive_can_packet():
             device_id:
               type: integer
               example: 1
-            data:
+            vin:
               type: string
-              example: "5756575A5A5A314A5A3257323337393733"
+              example: "5J8TB4H55FL123456"
+            dtc_code:
+              type: string
+              example: "P0301"
     responses:
       201:
         description: Dáta boli prijaté a spracované
+      400:
+        description: Chýbajúce alebo neplatné dáta
     """
     try:
         payload = request.get_json()
-        data_hex = payload.get("data")
         device_id = payload.get("device_id")
+        vin = payload.get("vin")
+        dtc_code = payload.get("dtc_code")
 
-        if not data_hex or device_id is None:
-            return jsonify({"error": "Missing 'data' or 'device_id'"}), 400
+        if device_id is None:
+            return jsonify({"error": "Missing 'device_id'"}), 400
 
-        # dekodovanie hex -> text
-        decoded_str = bytes.fromhex(data_hex).decode(errors="ignore").strip()
-        if not decoded_str:
-            return jsonify({"error": "Invalid hex data"}), 400
+        # Musí byť buď VIN alebo DTC
+        if not vin and not dtc_code:
+            return jsonify({"error": "Missing 'vin' or 'dtc_code'"}), 400
 
-        # --- Rozlíšenie VIN vs DTC ---
-        if len(decoded_str) > 15:  # VIN (17 znakov) zatial docasny hardcode - treba dorobit rozlisovanie podla prvych znakov napr vwv - len skoda ma ine atd... + kontrola poctu znakov 
-                                    # -alebo externe overit ci VIN existuje, neni najlepsie solution niektore vo vindecoderi nejsu + vpodstate mi je jedno ci je vin v niakej externej db, alebo nie...
-            vin = decoded_str
+        if vin and dtc_code:
+            return jsonify({"error": "Provide either 'vin' or 'dtc_code', not both"}), 400
+
+        # --- Spracovanie VIN ---
+        if vin:
+            vin = vin.strip().upper()
+            if len(vin) != 17:
+                return jsonify({"error": "VIN must be 17 characters"}), 400
+
             vehicle = Vehicle.query.filter_by(vin=vin).first()
             if not vehicle:
                 vehicle = Vehicle(vin=vin)
                 db.session.add(vehicle)
                 db.session.commit()
 
-            # aktualizuj LASTVINDEVICE
+            # Aktualizuj last_vin_id pre device
             state = DeviceVehicle.query.filter_by(device_id=device_id).first()
             if not state:
-                # vytvorenie device <-> vin
                 state = DeviceVehicle(device_id=device_id, last_vin_id=vehicle.id)
                 db.session.add(state)
             else:
-                # zmenenie last vin pre dany device
                 state.last_vin_id = vehicle.id
             db.session.commit()
 
             return jsonify({"status": "VIN stored", "vin": vin}), 201
 
-        else:  # packet je DTC
-            dtc_code = decoded_str
+        # --- Spracovanie DTC ---
+        if dtc_code:
+            dtc_code = dtc_code.strip().upper()
 
-            # VIN, ktoremu toto DTC patri
+            # Získaj aktuálny VIN pre daný device
             state = DeviceVehicle.query.filter_by(device_id=device_id).first()
             if not state or not state.last_vin_id:
-                return jsonify({"error": "VIN not found"}), 400
+                return jsonify({"error": "No VIN associated with this device"}), 400
 
             vehicle = Vehicle.query.get(state.last_vin_id)
             if not vehicle:
-                return jsonify({"error": "VIN not found"}), 404
+                return jsonify({"error": "Vehicle not found"}), 404
 
+            # Ulož DTC
             new_dtc = DTCCode(vin_id=vehicle.id, dtc_code=dtc_code)
             db.session.add(new_dtc)
             db.session.commit()
 
-            return jsonify({ # FEEDBACK PRE POSTMANA
+            return jsonify({
                 "status": "DTC stored",
                 "vin": vehicle.vin,
                 "dtc": dtc_code
             }), 201
 
     except Exception as e:
+        db.session.rollback()
         return jsonify({"error": str(e)}), 500
-
 
 @app.route("/api/vindecode", methods=["POST"])
 def decode_vin_apiverve():
