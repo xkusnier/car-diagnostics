@@ -12,6 +12,8 @@ from flask import jsonify
 from datetime import datetime, timedelta
 from flask_jwt_extended import JWTManager, create_access_token, jwt_required, get_jwt_identity  # Overenie importu
 
+
+
 app = Flask(__name__)
 CORS(app)
 swagger = Swagger(app)
@@ -92,6 +94,47 @@ class DtcCodeMeaning(db.Model):
     id = db.Column(db.Integer, primary_key=True)
     dtc_code = db.Column(db.String(20), unique=True, nullable=False)
     dtc_description = db.Column(db.Text, nullable=True)
+
+
+import requests
+from flask import Flask, jsonify, request
+
+app = Flask(__name__)
+
+@app.route("/api/vin/nhtsa", methods=["POST"])
+def decode_vin_nhtsa():
+    """
+    Dekóduje VIN pomocou NHTSA (bez API kľúča, zdarma)
+    """
+    try:
+        payload = request.get_json()
+        vin = payload.get("vin")
+        if not vin:
+            return jsonify({"error": "Missing VIN"}), 400
+
+        url = f"https://vpic.nhtsa.dot.gov/api/vehicles/decodevinvaluesextended/{vin}?format=json"
+        response = requests.get(url)
+        data = response.json()
+
+        if "Results" not in data:
+            return jsonify({"error": "Unexpected API response"}), 500
+
+        vehicle_info = data["Results"][0]
+        return jsonify({
+            "vin": vin,
+            "make": vehicle_info.get("Make"),
+            "model": vehicle_info.get("Model"),
+            "year": vehicle_info.get("ModelYear"),
+            "engine": vehicle_info.get("EngineModel"),
+            "bodyClass": vehicle_info.get("BodyClass"),
+            "manufacturer": vehicle_info.get("ManufacturerName"),
+        }), 200
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
+
+
 # Endpoint pre prihlásenie
 @app.route("/api/login", methods=["POST"])
 def login():
