@@ -243,7 +243,17 @@ def device_diagnostics(device_id):
     """
     try:
         user_id = int(get_jwt_identity())
-        device = Device.query.filter_by(id=device_id, user_id=user_id).first()
+        user = User.query.get(user_id)
+
+        if not user:
+            return jsonify({"error": "User not found"}), 404
+
+        # 👇 Ak je admin → môže vidieť všetko
+        if user.role == "admin":
+            device = Device.query.get(device_id)
+        else:
+            device = Device.query.filter_by(id=device_id, user_id=user_id).first()
+
         if not device:
             return jsonify({"error": "Device not found or not owned by user"}), 404
 
@@ -253,17 +263,15 @@ def device_diagnostics(device_id):
             vin_obj = Vehicle.query.get(device.link[0].last_vin_id)
             if vin_obj:
                 vin = vin_obj.vin
-                dtcs = [d.dtc_code for d in vin_obj.dtcs_active]  # 👈 fix tu
+                dtcs = [d.dtc_code for d in vin_obj.dtcs_active]
 
         return jsonify({
             "status": "success",
             "device_id": device.id,
             "vin": vin,
-            "dtc_codes": dtcs or [],  # ✅ ak je None → spraví z toho []
+            "dtc_codes": dtcs or [],
             "online": device.status
         }), 200
-
-
 
     except Exception as e:
         print("❌ DEVICE DIAGNOSTICS ERROR:", e)
