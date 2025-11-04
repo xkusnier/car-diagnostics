@@ -103,7 +103,6 @@ def home():
 import requests
 from flask import Flask, jsonify, request
 
-app = Flask(__name__)
 
 @app.route("/api/vin/nhtsa", methods=["POST"])
 def decode_vin_nhtsa():
