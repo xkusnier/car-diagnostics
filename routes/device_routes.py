@@ -1,7 +1,7 @@
 from flask import Blueprint, request, jsonify
 from flask_jwt_extended import jwt_required, get_jwt_identity
 from app import db
-from app.models import Device, DeviceVehicle, Vehicle, PendingCommand, User
+from models import Device, DeviceVehicle, Vehicle, PendingCommand, User
 
 device_bp = Blueprint("device", __name__, url_prefix="/api")
 
