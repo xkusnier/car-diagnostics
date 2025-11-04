@@ -247,6 +247,53 @@ def add_device():
         print("❌ ADD DEVICE ERROR:", e)
         return jsonify({"error": str(e)}), 500
 
+
+
+@app.route("/api/device/<int:device_id>/clear-dtcs", methods=["POST"])
+@jwt_required()
+def clear_device_dtcs(device_id):
+    """
+    Vymaže všetky aktívne DTC kódy pre dané zariadenie (Device).
+    """
+    try:
+        user_id = int(get_jwt_identity())
+        user = User.query.get(user_id)
+
+        if not user:
+            return jsonify({"error": "User not found"}), 404
+
+        # Ak nie je admin, over vlastníctvo zariadenia
+        if user.role != "admin":
+            device = Device.query.filter_by(id=device_id, user_id=user_id).first()
+        else:
+            device = Device.query.get(device_id)
+
+        if not device:
+            return jsonify({"error": "Device not found or not owned by user"}), 404
+
+        if not device.link or len(device.link) == 0 or not device.link[0].last_vin_id:
+            return jsonify({"error": "No VIN associated with device"}), 400
+
+        vin_id = device.link[0].last_vin_id
+
+        # Vymaž všetky aktívne DTC pre dané VIN
+        deleted = DTCCodeActive.query.filter_by(vin_id=vin_id).delete()
+        db.session.commit()
+
+        return jsonify({
+            "status": "success",
+            "deleted_count": deleted,
+            "message": f"Cleared {deleted} active DTC codes for device {device_id}"
+        }), 200
+
+    except Exception as e:
+        db.session.rollback()
+        print("❌ CLEAR DEVICE DTCS ERROR:", e)
+        return jsonify({"error": str(e)}), 500
+
+
+
+
 @app.route("/api/my-devices", methods=["GET"])
 @jwt_required()
 def my_devices():
