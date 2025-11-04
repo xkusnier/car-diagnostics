@@ -253,7 +253,7 @@ def device_diagnostics(device_id):
             vin_obj = Vehicle.query.get(device.link[0].last_vin_id)
             if vin_obj:
                 vin = vin_obj.vin
-                dtcs = [d.dtc_code for d in vin_obj.dtcs_active]
+                dtcs = [d.dtc_code for d in vin_obj.dtcs_active]  # 👈 fix tu
 
         return jsonify({
             "status": "success",
@@ -266,6 +266,7 @@ def device_diagnostics(device_id):
     except Exception as e:
         print("❌ DEVICE DIAGNOSTICS ERROR:", e)
         return jsonify({"error": str(e)}), 500
+
 
 
 # Endpoint pre prihlásenie
@@ -770,17 +771,22 @@ def decode_vin_apiverve():
 @app.route("/api/all", methods=["GET"])
 def show_all():
     """
-    Zobrazí všetky VIN a priradené DTC kódy (z aktívnej tabuľky).
+    Zobrazí všetky VIN a priradené DTC kódy (z aktívnych aj historických tabuliek).
     """
-    vehicles = Vehicle.query.all()
-    data = []
-    for v in vehicles:
-        data.append({
-            "vin": v.vin,
-            "dtc_codes_active": [d.dtc_code for d in v.dtcs_active],
-            "dtc_codes_history": [d.dtc_code for d in v.dtcs_history]
-        })
-    return jsonify(data)
+    try:
+        vehicles = Vehicle.query.all()
+        data = []
+        for v in vehicles:
+            data.append({
+                "vin": v.vin,
+                "dtc_codes_active": [d.dtc_code for d in v.dtcs_active],
+                "dtc_codes_history": [d.dtc_code for d in v.dtcs_history]
+            })
+        return jsonify(data), 200
+    except Exception as e:
+        print("❌ SHOW ALL ERROR:", e)
+        return jsonify({"error": str(e)}), 500
+
 
 
 if __name__ == "__main__":
