@@ -11,7 +11,13 @@ from io import StringIO
 from flask import jsonify
 from datetime import datetime, timedelta
 from flask_jwt_extended import JWTManager, create_access_token, jwt_required, get_jwt_identity  # Overenie importu
+from routes.auth_routes import auth_bp
+from routes.device_routes import device_bp
+from routes.vin_routes import vin_bp
 
+app.register_blueprint(auth_bp)
+app.register_blueprint(device_bp)
+app.register_blueprint(vin_bp)
 
 
 # Inicializácia globálnych objektov
