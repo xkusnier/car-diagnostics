@@ -37,11 +37,11 @@ def create_app():
     app.config["SQLALCHEMY_DATABASE_URI"] = db_url
     app.config["SQLALCHEMY_TRACK_MODIFICATIONS"] = False
 
-    # ------------------- INIT -------------------
+    # ------------------- INIT EXTENSIONS -------------------
     db.init_app(app)
     jwt.init_app(app)
 
-    # ------------------- REGISTER ROUTES -------------------
+    # ------------------- REGISTER BLUEPRINTS -------------------
     from routes.auth_routes import auth_bp
     from routes.device_routes import device_bp
     from routes.vin_routes import vin_bp
@@ -50,7 +50,7 @@ def create_app():
     app.register_blueprint(device_bp)
     app.register_blueprint(vin_bp)
 
-    # ------------------- BASIC ROUTE -------------------
+    # ------------------- SIMPLE ROUTE -------------------
     @app.route("/")
     def home():
         return jsonify({"status": "ok", "message": "Flask beží modularne"})
@@ -61,7 +61,9 @@ def create_app():
     return app
 
 
-# ------------------- RUN SERVER -------------------
+# ✅ Toto je kritické: Render (Gunicorn) potrebuje objekt app
+app = create_app()
+
+# ✅ Toto slúži len pre lokálne spustenie
 if __name__ == "__main__":
-    app = create_app()
     app.run(host="0.0.0.0", port=int(os.environ.get("PORT", 5000)))
