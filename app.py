@@ -358,49 +358,6 @@ def my_devices():
         return jsonify({"error": str(e)}), 500
 
 
-@app.route("/api/device/<int:device_id>/diagnostics", methods=["GET"])
-@jwt_required()
-def device_diagnostics(device_id):
-    """
-    Vráti DTC kódy a VIN pre konkrétne zariadenie.
-    """
-    try:
-        user_id = int(get_jwt_identity())
-        user = User.query.get(user_id)
-
-        if not user:
-            return jsonify({"error": "User not found"}), 404
-
-        # 👇 Ak je admin → môže vidieť všetko
-        if user.role == "admin":
-            device = Device.query.get(device_id)
-        else:
-            device = Device.query.filter_by(id=device_id, user_id=user_id).first()
-
-        if not device:
-            return jsonify({"error": "Device not found or not owned by user"}), 404
-
-        vin = None
-        dtcs = []
-        if device.link and len(device.link) > 0 and device.link[0].last_vin_id:
-            vin_obj = Vehicle.query.get(device.link[0].last_vin_id)
-            if vin_obj:
-                vin = vin_obj.vin
-                dtcs = [d.dtc_code for d in vin_obj.dtcs_active]
-
-        return jsonify({
-            "status": "success",
-            "device_id": device.id,
-            "vin": vin,
-            "dtc_codes": dtcs or [],
-            "online": device.status
-        }), 200
-
-    except Exception as e:
-        print("❌ DEVICE DIAGNOSTICS ERROR:", e)
-        return jsonify({"error": str(e)}), 500
-
-
 
 # Endpoint pre prihlásenie
 @app.route("/api/login", methods=["POST"])
