@@ -35,6 +35,12 @@ app.config["SQLALCHEMY_TRACK_MODIFICATIONS"] = False
 db = SQLAlchemy(app)
 ## toto je test ci funguje git
 # MODELY DB
+class DeviceUser(db.Model):
+    __tablename__ = "device_user"
+    user_id = db.Column(db.Integer, db.ForeignKey("users.id"), primary_key=True)
+    device_id = db.Column(db.Integer, db.ForeignKey("device.id"), primary_key=True)
+    status = db.Column(db.Boolean, default=True)
+
 class User(db.Model):
     __tablename__ = "users"
     id = db.Column(db.Integer, primary_key=True)
@@ -77,6 +83,12 @@ class PendingCommand(db.Model):
     command = db.Column(db.String(50), nullable=False)
     executed = db.Column(db.Boolean, default=False)
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
+# --- DTC CODES DATABASE MODEL ---
+class DtcCodeMeaning(db.Model):
+    __tablename__ = "dtc_codes_meaning"
+    id = db.Column(db.Integer, primary_key=True)
+    dtc_code = db.Column(db.String(20), unique=True, nullable=False)
+    dtc_description = db.Column(db.Text, nullable=True)
 
 @app.route("/init-db")
 def init_db():
@@ -87,14 +99,6 @@ def init_db():
 @app.route("/", methods=["GET"])
 def home():
     return jsonify({"status": "ok", "message": "Flask bezi"})
-
-# --- DTC CODES DATABASE MODEL ---
-class DtcCodeMeaning(db.Model):
-    __tablename__ = "dtc_codes_meaning"
-    id = db.Column(db.Integer, primary_key=True)
-    dtc_code = db.Column(db.String(20), unique=True, nullable=False)
-    dtc_description = db.Column(db.Text, nullable=True)
-
 
 import requests
 from flask import Flask, jsonify, request
