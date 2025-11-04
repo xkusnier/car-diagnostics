@@ -577,6 +577,10 @@ def receive_can_packet():
         if vin and dtc_code:
             return jsonify({"error": "Provide either 'vin' or 'dtc_code', not both"}), 400
 
+        device = Device.query.get(device_id)
+        if not device:
+            return jsonify({"error": f"Device {device_id} not found"}), 404
+
         # --- Spracovanie VIN ---
         if vin:
             vin = vin.strip().upper()
@@ -589,6 +593,9 @@ def receive_can_packet():
                 db.session.add(vehicle)
                 db.session.commit()
 
+            # ✅ Device sa automaticky označí ako online
+            device.status = True
+
             # Aktualizuj last_vin_id pre device
             state = DeviceVehicle.query.filter_by(device_id=device_id).first()
             if not state:
@@ -596,9 +603,13 @@ def receive_can_packet():
                 db.session.add(state)
             else:
                 state.last_vin_id = vehicle.id
-            db.session.commit()
 
-            return jsonify({"status": "VIN stored", "vin": vin}), 201
+            db.session.commit()
+            return jsonify({
+                "status": "VIN stored",
+                "vin": vin,
+                "device_status": "Online"
+            }), 201
 
         # --- Spracovanie DTC ---
         if dtc_code:
@@ -627,6 +638,34 @@ def receive_can_packet():
     except Exception as e:
         db.session.rollback()
         return jsonify({"error": str(e)}), 500
+
+
+@app.route("/api/device_offline/<int:device_id>", methods=["POST"])
+def device_offline(device_id):
+    """
+    Nastaví zariadenie na OFFLINE stav manuálne.
+    --- 
+    tags:
+      - Device
+    """
+    try:
+        device = Device.query.get(device_id)
+        if not device:
+            return jsonify({"error": "Device not found"}), 404
+
+        device.status = False
+        db.session.commit()
+        return jsonify({
+            "status": "success",
+            "device_id": device_id,
+            "message": "Device set to offline"
+        }), 200
+
+    except Exception as e:
+        db.session.rollback()
+        return jsonify({"error": str(e)}), 500
+
+
 
 @app.route("/api/vindecode", methods=["POST"])
 def decode_vin_apiverve():
