@@ -253,7 +253,7 @@ def device_diagnostics(device_id):
             vin_obj = Vehicle.query.get(device.link[0].last_vin_id)
             if vin_obj:
                 vin = vin_obj.vin
-                dtcs = [d.dtc_code for d in vin_obj.dtcs]
+                dtcs = [d.dtc_code for d in vin_obj.dtcs_active]
 
         return jsonify({
             "status": "success",
@@ -770,22 +770,18 @@ def decode_vin_apiverve():
 @app.route("/api/all", methods=["GET"])
 def show_all():
     """
-    Zobrazí všetky VIN a priradené DTC kódy.
-    ---
-    tags:
-      - VIN Communication
-    responses:
-      200:
-        description: Zoznam VIN a DTC
+    Zobrazí všetky VIN a priradené DTC kódy (z aktívnej tabuľky).
     """
     vehicles = Vehicle.query.all()
     data = []
     for v in vehicles:
         data.append({
             "vin": v.vin,
-            "dtc_codes": [d.dtc_code for d in v.dtcs]
+            "dtc_codes_active": [d.dtc_code for d in v.dtcs_active],
+            "dtc_codes_history": [d.dtc_code for d in v.dtcs_history]
         })
     return jsonify(data)
+
 
 if __name__ == "__main__":
     with app.app_context():
