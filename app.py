@@ -135,6 +135,52 @@ def decode_vin_nhtsa():
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
+@app.route("/api/add-device", methods=["POST"])
+@jwt_required()
+def add_device():
+    """
+    Pridá nové zariadenie (device) do databázy.
+    ---
+    tags:
+      - Device
+    parameters:
+      - in: body
+        name: body
+        required: true
+        schema:
+          type: object
+          properties:
+            device_id:
+              type: integer
+              example: 10
+    responses:
+      201:
+        description: Zariadenie bolo pridané
+      400:
+        description: Chýbajúce alebo neplatné dáta
+    """
+    try:
+        payload = request.get_json()
+        device_id = payload.get("device_id")
+        user = get_jwt_identity()  # Z JWT tokenu zistíme, ktorý používateľ je prihlásený
+
+        if not device_id:
+            return jsonify({"error": "Missing 'device_id'"}), 400
+
+        # Skontroluj, či už device existuje
+        existing = Device.query.get(device_id)
+        if existing:
+            return jsonify({"error": "Device already exists"}), 409
+
+        new_device = Device(id=device_id, user_id=user["id"], status=False)
+        db.session.add(new_device)
+        db.session.commit()
+
+        return jsonify({"status": "success", "device_id": device_id}), 201
+
+    except Exception as e:
+        db.session.rollback()
+        return jsonify({"error": str(e)}), 500
 
 
 
