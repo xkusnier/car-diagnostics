@@ -144,32 +144,39 @@ def add_device():
     try:
         payload = request.get_json()
         device_id_raw = payload.get("device_id")
-        user_id = get_jwt_identity()  # teraz je to string s ID
-        user = User.query.get(int(user_id))
+        target_user_id = payload.get("user_id")  # 👈 admin zadá user_id
+        current_user_id = int(get_jwt_identity())
+        current_user = User.query.get(current_user_id)
 
-        if not user:
+        if not current_user:
             return jsonify({"error": "User not found"}), 404
 
-        # Konverzia na integer
+        # 🔐 ak nie je admin, môže pridať len sebe
+        if current_user.role != "admin":
+            target_user_id = current_user.id
+
+        if not target_user_id:
+            return jsonify({"error": "Missing user_id (admin only)"}), 400
+
         try:
             device_id = int(device_id_raw)
         except (ValueError, TypeError):
             return jsonify({"error": "Device ID must be an integer"}), 400
 
-        # Kontrola duplicity
         existing = Device.query.get(device_id)
         if existing:
             return jsonify({"error": f"Device ID {device_id} already exists"}), 409
 
-        # Vytvorenie nového záznamu
-        new_device = Device(id=device_id, user_id=user.id, status=False)
+        # ✅ pridanie zariadenia
+        new_device = Device(id=device_id, user_id=int(target_user_id), status=False)
         db.session.add(new_device)
         db.session.commit()
 
         return jsonify({
             "status": "success",
             "device_id": device_id,
-            "message": f"Device {device_id} successfully added"
+            "assigned_to": int(target_user_id),
+            "message": f"Device {device_id} assigned to user {target_user_id}"
         }), 201
 
     except Exception as e:
@@ -186,12 +193,16 @@ def my_devices():
     """
     try:
         user_id = int(get_jwt_identity())
+        user = User.query.get(user_id)
 
-        devices = (
-            db.session.query(Device)
-            .filter_by(user_id=user_id)
-            .all()
-        )
+        if not user:
+            return jsonify({"error": "User not found"}), 404
+
+        # 👑 ak admin → všetky devices
+        if user.role == "admin":
+            devices = Device.query.all()
+        else:
+            devices = Device.query.filter_by(user_id=user_id).all()
 
         result = []
         for d in devices:
@@ -204,6 +215,7 @@ def my_devices():
                 "device_id": d.id,
                 "vin": vin,
                 "status": "Online" if d.status else "Offline",
+                "user_id": d.user_id  # 👈 pre admina
             })
 
         return jsonify({"status": "success", "devices": result}), 200
@@ -282,12 +294,16 @@ def login():
             return jsonify({"error": "Missing email or password"}), 400
 
         user = User.query.filter_by(email=email).first()
-        if not user or user.password != password:  # Pre jednoduchosť porovnávam heslo priamo (v praxi použi hashovanie, napr. bcrypt)
+        if not user or user.password != password:
             return jsonify({"error": "Invalid credentials"}), 401
 
-        # Generovanie JWT tokenu
+        # 🔑 Generovanie JWT tokenu
         access_token = create_access_token(identity=str(user.id))
-        return jsonify({"status": "success", "access_token": access_token}), 200
+        return jsonify({
+            "status": "success",
+            "access_token": access_token,
+            "role": user.role   # 👈 pošleme rolu do FE
+        }), 200
 
     except Exception as e:
         return jsonify({"error": str(e)}), 500
