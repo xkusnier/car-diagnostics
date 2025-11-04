@@ -177,6 +177,73 @@ def add_device():
         print("❌ ADD DEVICE ERROR:", e)
         return jsonify({"error": str(e)}), 500
 
+@app.route("/api/my-devices", methods=["GET"])
+@jwt_required()
+def my_devices():
+    """
+    Vráti všetky zariadenia prihláseného používateľa,
+    spolu s VIN a online statusom.
+    """
+    try:
+        user_id = int(get_jwt_identity())
+
+        devices = (
+            db.session.query(Device)
+            .filter_by(user_id=user_id)
+            .all()
+        )
+
+        result = []
+        for d in devices:
+            vin = None
+            if d.link and len(d.link) > 0 and d.link[0].last_vin_id:
+                vin_obj = Vehicle.query.get(d.link[0].last_vin_id)
+                vin = vin_obj.vin if vin_obj else None
+
+            result.append({
+                "device_id": d.id,
+                "vin": vin,
+                "status": "Online" if d.status else "Offline",
+            })
+
+        return jsonify({"status": "success", "devices": result}), 200
+
+    except Exception as e:
+        print("❌ MY DEVICES ERROR:", e)
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route("/api/device/<int:device_id>/diagnostics", methods=["GET"])
+@jwt_required()
+def device_diagnostics(device_id):
+    """
+    Vráti DTC kódy a VIN pre konkrétne zariadenie.
+    """
+    try:
+        user_id = int(get_jwt_identity())
+        device = Device.query.filter_by(id=device_id, user_id=user_id).first()
+        if not device:
+            return jsonify({"error": "Device not found or not owned by user"}), 404
+
+        vin = None
+        dtcs = []
+        if device.link and len(device.link) > 0 and device.link[0].last_vin_id:
+            vin_obj = Vehicle.query.get(device.link[0].last_vin_id)
+            if vin_obj:
+                vin = vin_obj.vin
+                dtcs = [d.dtc_code for d in vin_obj.dtcs]
+
+        return jsonify({
+            "status": "success",
+            "device_id": device.id,
+            "vin": vin,
+            "dtc_codes": dtcs,
+            "online": device.status
+        }), 200
+
+    except Exception as e:
+        print("❌ DEVICE DIAGNOSTICS ERROR:", e)
+        return jsonify({"error": str(e)}), 500
 
 
 # Endpoint pre prihlásenie
