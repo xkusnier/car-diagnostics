@@ -114,6 +114,59 @@ import requests
 from flask import Flask, jsonify, request
 
 
+@app.route("/api/dtc-history-full", methods=["POST"])
+@jwt_required(optional=True)
+def dtc_history_full():
+    """
+    Vráti úplnú históriu DTC kódov pre dané VIN,
+    vrátane popisu chyby z tabuľky dtc_codes_meaning.
+    Prístupné pre všetkých prihlásených aj neprihlásených.
+    """
+    try:
+        data = request.get_json()
+        vin = data.get("vin")
+
+        if not vin:
+            return jsonify({"error": "Missing 'vin' parameter"}), 400
+
+        vehicle = Vehicle.query.filter_by(vin=vin.upper()).first()
+        if not vehicle:
+            return jsonify({"error": "Vehicle not found"}), 404
+
+        history = (
+            db.session.query(
+                DTCCodeHistory.dtc_code,
+                DTCCodeHistory.created_at,
+                DtcCodeMeaning.dtc_description
+            )
+            .outerjoin(DtcCodeMeaning, DTCCodeHistory.dtc_code == DtcCodeMeaning.dtc_code)
+            .filter(DTCCodeHistory.vin_id == vehicle.id)
+            .order_by(DTCCodeHistory.created_at.desc())
+            .all()
+        )
+
+        results = [
+            {
+                "dtc_code": h.dtc_code,
+                "description": h.dtc_description or "No description available",
+                "created_at": h.created_at.isoformat()
+            }
+            for h in history
+        ]
+
+        return jsonify({
+            "status": "success",
+            "vin": vin.upper(),
+            "history": results
+        }), 200
+
+    except Exception as e:
+        print("❌ DTC HISTORY FULL ERROR:", e)
+        return jsonify({"error": str(e)}), 500
+
+
+
+
 @app.route("/api/vin/nhtsa", methods=["POST"])
 def decode_vin_nhtsa():
     """
