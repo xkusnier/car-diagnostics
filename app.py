@@ -67,14 +67,24 @@ class Vehicle(db.Model):
     __tablename__ = "vehicles"
     id = db.Column(db.Integer, primary_key=True)
     vin = db.Column(db.String(50), unique=True, nullable=False)
-    dtcs = db.relationship("DTCCode", backref="vehicle", lazy=True, cascade="all, delete")
+    dtcs_active = db.relationship("DTCCodeActive", backref="vehicle", lazy=True, cascade="all, delete")
+    dtcs_history = db.relationship("DTCCodeHistory", backref="vehicle", lazy=True, cascade="all, delete")
 
-class DTCCode(db.Model):
-    __tablename__ = "dtc_codes"
+
+class DTCCodeActive(db.Model):
+    __tablename__ = "dtc_codes_active"
     id = db.Column(db.Integer, primary_key=True)
     vin_id = db.Column(db.Integer, db.ForeignKey("vehicles.id"), nullable=False)
     dtc_code = db.Column(db.String(20), nullable=False)
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
+
+class DTCCodeHistory(db.Model):
+    __tablename__ = "dtc_codes_history"
+    id = db.Column(db.Integer, primary_key=True)
+    vin_id = db.Column(db.Integer, db.ForeignKey("vehicles.id"), nullable=False)
+    dtc_code = db.Column(db.String(20), nullable=False)
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+
 # PRIDAJ SEM – hneď za class DTCCode(db.Model): ...
 class PendingCommand(db.Model):
     __tablename__ = "pending_commands"
@@ -625,9 +635,17 @@ def receive_can_packet():
                 return jsonify({"error": "Vehicle not found"}), 404
 
             # Ulož DTC
-            new_dtc = DTCCode(vin_id=vehicle.id, dtc_code=dtc_code)
-            db.session.add(new_dtc)
+            # Uloženie DTC do history (vždy)
+            dtc_history = DTCCodeHistory(vin_id=vehicle.id, dtc_code=dtc_code)
+            db.session.add(dtc_history)
+            
+            # Uloženie DTC do active (najnovšie chyby)
+            # Najskôr zmaž staré záznamy pre rovnaký VIN a rovnaký kód
+            DTCCodeActive.query.filter_by(vin_id=vehicle.id, dtc_code=dtc_code).delete()
+            db.session.add(DTCCodeActive(vin_id=vehicle.id, dtc_code=dtc_code))
             db.session.commit()
+
+
 
             return jsonify({
                 "status": "DTC stored",
@@ -638,6 +656,23 @@ def receive_can_packet():
     except Exception as e:
         db.session.rollback()
         return jsonify({"error": str(e)}), 500
+
+
+
+@app.route("/api/dtc-history/<vin>", methods=["GET"])
+@jwt_required()
+def get_dtc_history(vin):
+    vehicle = Vehicle.query.filter_by(vin=vin.upper()).first()
+    if not vehicle:
+        return jsonify({"error": "Vehicle not found"}), 404
+
+    history = DTCCodeHistory.query.filter_by(vin_id=vehicle.id).order_by(DTCCodeHistory.created_at.desc()).all()
+    return jsonify({
+        "vin": vin,
+        "dtc_history": [
+            {"dtc_code": d.dtc_code, "created_at": d.created_at.isoformat()} for d in history
+        ]
+    }), 200
 
 
 @app.route("/api/device_offline/<int:device_id>", methods=["POST"])
