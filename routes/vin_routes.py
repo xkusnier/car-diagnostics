@@ -1,6 +1,5 @@
 from flask import Blueprint, request, jsonify
-from app import db
-from models import Device, Vehicle, DTCCode, DtcCodeMeaning, DeviceVehicle
+from models import Device, Vehicle, DTCCode, DtcCodeMeaning, DeviceVehicle, db
 import requests
 import os
 import csv
