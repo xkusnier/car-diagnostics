@@ -144,7 +144,11 @@ def add_device():
     try:
         payload = request.get_json()
         device_id_raw = payload.get("device_id")
-        user = get_jwt_identity()
+        user_id = get_jwt_identity()  # teraz je to string s ID
+        user = User.query.get(int(user_id))
+
+        if not user:
+            return jsonify({"error": "User not found"}), 404
 
         # Konverzia na integer
         try:
@@ -158,7 +162,7 @@ def add_device():
             return jsonify({"error": f"Device ID {device_id} already exists"}), 409
 
         # Vytvorenie nového záznamu
-        new_device = Device(id=device_id, user_id=user["id"], status=False)
+        new_device = Device(id=device_id, user_id=user.id, status=False)
         db.session.add(new_device)
         db.session.commit()
 
@@ -215,7 +219,7 @@ def login():
             return jsonify({"error": "Invalid credentials"}), 401
 
         # Generovanie JWT tokenu
-        access_token = create_access_token(identity={"id": user.id, "email": user.email, "role": user.role})
+        access_token = create_access_token(identity=str(user.id))
         return jsonify({"status": "success", "access_token": access_token}), 200
 
     except Exception as e:
