@@ -249,11 +249,11 @@ def add_device():
 
 
 
-@app.route("/api/device/<int:device_id>/clear-dtcs", methods=["POST"])
+@app.route("/api/device/<int:device_id>/diagnostics", methods=["GET"])
 @jwt_required()
-def clear_device_dtcs(device_id):
+def device_diagnostics(device_id):
     """
-    Vymaže všetky aktívne DTC kódy pre dané zariadenie (Device).
+    Vráti DTC kódy, popis a VIN pre konkrétne zariadenie.
     """
     try:
         user_id = int(get_jwt_identity())
@@ -262,34 +262,57 @@ def clear_device_dtcs(device_id):
         if not user:
             return jsonify({"error": "User not found"}), 404
 
-        # Ak nie je admin, over vlastníctvo zariadenia
-        if user.role != "admin":
-            device = Device.query.filter_by(id=device_id, user_id=user_id).first()
-        else:
+        # 👑 Admin môže vidieť všetko
+        if user.role == "admin":
             device = Device.query.get(device_id)
+        else:
+            device = Device.query.filter_by(id=device_id, user_id=user_id).first()
 
         if not device:
             return jsonify({"error": "Device not found or not owned by user"}), 404
 
-        if not device.link or len(device.link) == 0 or not device.link[0].last_vin_id:
-            return jsonify({"error": "No VIN associated with device"}), 400
+        vin = None
+        dtcs = []
 
-        vin_id = device.link[0].last_vin_id
+        if device.link and len(device.link) > 0 and device.link[0].last_vin_id:
+            vin_obj = Vehicle.query.get(device.link[0].last_vin_id)
+            if vin_obj:
+                vin = vin_obj.vin
 
-        # Vymaž všetky aktívne DTC pre dané VIN
-        deleted = DTCCodeActive.query.filter_by(vin_id=vin_id).delete()
-        db.session.commit()
+                # 🧩 Join s tabuľkou dtc_codes_meaning kvôli popisu
+                dtcs_query = (
+                    db.session.query(
+                        DTCCodeActive.dtc_code,
+                        DTCCodeActive.created_at,
+                        DtcCodeMeaning.dtc_description
+                    )
+                    .outerjoin(DtcCodeMeaning, DTCCodeActive.dtc_code == DtcCodeMeaning.dtc_code)
+                    .filter(DTCCodeActive.vin_id == vin_obj.id)
+                    .order_by(DTCCodeActive.created_at.desc())
+                    .all()
+                )
+
+                dtcs = [
+                    {
+                        "dtc_code": d.dtc_code,
+                        "description": d.dtc_description or "No description",
+                        "created_at": d.created_at.isoformat() if d.created_at else None,
+                    }
+                    for d in dtcs_query
+                ]
 
         return jsonify({
             "status": "success",
-            "deleted_count": deleted,
-            "message": f"Cleared {deleted} active DTC codes for device {device_id}"
+            "device_id": device.id,
+            "vin": vin,
+            "dtc_codes": dtcs or [],
+            "online": device.status
         }), 200
 
     except Exception as e:
-        db.session.rollback()
-        print("❌ CLEAR DEVICE DTCS ERROR:", e)
+        print("❌ DEVICE DIAGNOSTICS ERROR:", e)
         return jsonify({"error": str(e)}), 500
+
 
 
 
