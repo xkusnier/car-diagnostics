@@ -14,6 +14,7 @@ from flask_jwt_extended import JWTManager, create_access_token, jwt_required, ge
 from routes.auth_routes import auth_bp
 from routes.device_routes import device_bp
 from routes.vin_routes import vin_bp
+from models import db
 
 app.register_blueprint(auth_bp)
 app.register_blueprint(device_bp)
