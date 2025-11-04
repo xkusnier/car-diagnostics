@@ -143,26 +143,36 @@ def add_device():
     """
     try:
         payload = request.get_json()
-        device_id = payload.get("device_id")
-        user = get_jwt_identity()  # Z JWT tokenu zistíme, kto pridáva device
+        device_id_raw = payload.get("device_id")
+        user = get_jwt_identity()
 
-        if not device_id or not isinstance(device_id, int):
-            return jsonify({"error": "Invalid or missing 'device_id'"}), 400
+        # Konverzia na integer
+        try:
+            device_id = int(device_id_raw)
+        except (ValueError, TypeError):
+            return jsonify({"error": "Device ID must be an integer"}), 400
 
-        # Skontroluj, či už device existuje
+        # Kontrola duplicity
         existing = Device.query.get(device_id)
         if existing:
             return jsonify({"error": f"Device ID {device_id} already exists"}), 409
 
+        # Vytvorenie nového záznamu
         new_device = Device(id=device_id, user_id=user["id"], status=False)
         db.session.add(new_device)
         db.session.commit()
 
-        return jsonify({"status": "success", "device_id": device_id}), 201
+        return jsonify({
+            "status": "success",
+            "device_id": device_id,
+            "message": f"Device {device_id} successfully added"
+        }), 201
 
     except Exception as e:
         db.session.rollback()
-        return jsonify({"error": f"Unexpected server error: {str(e)}"}), 500
+        print("❌ ADD DEVICE ERROR:", e)
+        return jsonify({"error": str(e)}), 500
+
 
 
 # Endpoint pre prihlásenie
