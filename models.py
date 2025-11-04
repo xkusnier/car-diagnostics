@@ -1,5 +1,8 @@
 from datetime import datetime
 from app import db
+from flask_sqlalchemy import SQLAlchemy
+
+db = SQLAlchemy()
 
 class DeviceUser(db.Model):
     __tablename__ = "device_user"
