@@ -1,3 +1,19 @@
+from flask import Flask, request, jsonify
+from flask_sqlalchemy import SQLAlchemy
+from flasgger import Swagger
+from datetime import datetime
+import os
+import requests
+from flask_cors import CORS
+import csv
+import requests
+from io import StringIO
+from flask import jsonify
+from datetime import datetime, timedelta
+from flask_jwt_extended import JWTManager, create_access_token, jwt_required, get_jwt_identity  # Overenie importu
+
+
+
 # Inicializácia globálnych objektov
 db = SQLAlchemy()
 jwt = JWTManager()
