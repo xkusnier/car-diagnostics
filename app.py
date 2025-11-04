@@ -259,9 +259,11 @@ def device_diagnostics(device_id):
             "status": "success",
             "device_id": device.id,
             "vin": vin,
-            "dtc_codes": dtcs,
+            "dtc_codes": dtcs or [],  # ✅ ak je None → spraví z toho []
             "online": device.status
         }), 200
+
+
 
     except Exception as e:
         print("❌ DEVICE DIAGNOSTICS ERROR:", e)
