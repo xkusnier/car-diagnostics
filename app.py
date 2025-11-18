@@ -659,20 +659,26 @@ def trigger_command():
         schema:
           properties:
             device_id: {type: integer, example: 1}
-            command: {type: string, enum: [GET_VIN, GET_DTCS_PERM, GET_DTCS_PEND, GET_RPM, GET_TEMP]}
+            command: {type: string, enum: [GET_VIN, GET_DTCS_PERM, GET_DTCS_PEND, GET_RPM, GET_TEMP, CLEAR_DTCS]}
     responses:
       200: {description: Príkaz zaradený}
     """
- try:
+    try:
         data = request.get_json()
         device_id = data.get("device_id")
         command = data.get("command")
 
-        # ➕ PRIDANÉ: CLEAR_DTCS do zoznamu povolených príkazov
-        valid_commands = ["GET_VIN", "GET_DTCS_PERM", "GET_DTCS_PEND", 
-                          "GET_RPM", "GET_TEMP", "CLEAR_DTCS"]
+        # ➕ CLEAR_DTCS patrí medzi povolené príkazy
+        valid_commands = [
+            "GET_VIN",
+            "GET_DTCS_PERM",
+            "GET_DTCS_PEND",
+            "GET_RPM",
+            "GET_TEMP",
+            "CLEAR_DTCS"
+        ]
 
-        if command not in valid_commands:  # ⚠️ pôvodne CLEAR_DTCS nebolo povolené
+        if command not in valid_commands:
             return jsonify({"error": "invalid command"}), 400
 
         cmd = PendingCommand(device_id=device_id, command=command)
@@ -683,6 +689,7 @@ def trigger_command():
 
     except Exception as e:
         return jsonify({"error": str(e)}), 500
+
 
 @app.route("/api/can", methods=["POST"])
 def receive_can_packet():
