@@ -668,14 +668,14 @@ def trigger_command():
         device_id = data.get("device_id")
         command = data.get("command")
 
-        # ➕ CLEAR_DTCS patrí medzi povolené príkazy
+        # CLEAR_DTCS patrí medzi povolené príkazy
         valid_commands = [
             "GET_VIN",
             "GET_DTCS_PERM",
             "GET_DTCS_PEND",
             "GET_RPM",
             "GET_TEMP",
-            "CLEAR_DTCS"
+            "CLEAR_DTCS",
         ]
 
         if command not in valid_commands:
