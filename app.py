@@ -117,8 +117,12 @@ from flask import Flask, jsonify, request
 @jwt_required()
 def clear_device_dtcs(device_id):
     """
-    Vymaže všetky aktívne DTC kódy pre dané zariadenie (Device).
+    Namiesto vymazania DTC z DB teraz:
+    ➤ vytvorí pending command CLEAR_DTCS
+    ➤ RPi vymaže chyby v aute
+    ➤ RPi neskôr pošle výsledok clear_status cez /api/can
     """
+
     try:
         user_id = int(get_jwt_identity())
         user = User.query.get(user_id)
@@ -126,7 +130,7 @@ def clear_device_dtcs(device_id):
         if not user:
             return jsonify({"error": "User not found"}), 404
 
-        # 🔐 Overenie vlastníctva (len admin vidí všetko)
+        # Kontrola vlastníctva ako predtým
         if user.role == "admin":
             device = Device.query.get(device_id)
         else:
@@ -135,20 +139,18 @@ def clear_device_dtcs(device_id):
         if not device:
             return jsonify({"error": "Device not found or not owned by user"}), 404
 
-        # Získaj VIN ID
-        if not device.link or len(device.link) == 0 or not device.link[0].last_vin_id:
-            return jsonify({"error": "No VIN associated with this device"}), 400
+        # ⚠️ TOTO SME ODSTRÁNILI:
+        # deleted_count = DTCCodeActive.query.filter_by(vin_id=vin_id).delete()
+        # teraz sa DB nemaže hneď!
 
-        vin_id = device.link[0].last_vin_id
-
-        # ✅ Vymaž všetky aktívne DTC kódy pre dané VIN
-        deleted_count = DTCCodeActive.query.filter_by(vin_id=vin_id).delete()
+        # ➕ NOVÉ: vytvoríme príkaz
+        cmd = PendingCommand(device_id=device_id, command="CLEAR_DTCS")
+        db.session.add(cmd)
         db.session.commit()
 
         return jsonify({
-            "status": "success",
-            "message": f"Cleared {deleted_count} active DTC codes for device {device_id}",
-            "deleted_count": deleted_count
+            "status": "waiting",
+            "message": "Clear command sent to device. Waiting for RPi confirmation."
         }), 200
 
     except Exception as e:
@@ -661,71 +663,71 @@ def trigger_command():
     responses:
       200: {description: Príkaz zaradený}
     """
-    try:
+ try:
         data = request.get_json()
         device_id = data.get("device_id")
         command = data.get("command")
 
-        if command not in ["GET_VIN", "GET_DTCS_PERM", "GET_DTCS_PEND", "GET_RPM", "GET_TEMP"]:
+        # ➕ PRIDANÉ: CLEAR_DTCS do zoznamu povolených príkazov
+        valid_commands = ["GET_VIN", "GET_DTCS_PERM", "GET_DTCS_PEND", 
+                          "GET_RPM", "GET_TEMP", "CLEAR_DTCS"]
+
+        if command not in valid_commands:  # ⚠️ pôvodne CLEAR_DTCS nebolo povolené
             return jsonify({"error": "invalid command"}), 400
 
         cmd = PendingCommand(device_id=device_id, command=command)
         db.session.add(cmd)
         db.session.commit()
+
         return jsonify({"status": "queued", "command": command}), 200
+
     except Exception as e:
         return jsonify({"error": str(e)}), 500
-# prijimanie packetov (zatial iba message_type= RAW_DATA)
+
 @app.route("/api/can", methods=["POST"])
 def receive_can_packet():
     """
-    Raspberry odošle VIN alebo DTC dáta ako TEXT (už dekódované na RPi).
-    ---
-    tags:
-      - VIN Communication
-    parameters:
-      - in: body
-        name: body
-        required: true
-        schema:
-          type: object
-          properties:
-            device_id:
-              type: integer
-              example: 1
-            vin:
-              type: string
-              example: "5J8TB4H55FL123456"
-            dtc_code:
-              type: string
-              example: "P0301"
-    responses:
-      201:
-        description: Dáta boli prijaté a spracované
-      400:
-        description: Chýbajúce alebo neplatné dáta
+    RPi pošle VIN, DTC alebo clear_status po CLEAR_DTCS akcii.
     """
     try:
         payload = request.get_json()
         device_id = payload.get("device_id")
         vin = payload.get("vin")
         dtc_code = payload.get("dtc_code")
+        
+        # ➕ NOVÉ: výsledok CLEAR_DTCS
+        clear_status = payload.get("clear_status")  # "ok" alebo "fail"
 
         if device_id is None:
             return jsonify({"error": "Missing 'device_id'"}), 400
-
-        # Musí byť buď VIN alebo DTC
-        if not vin and not dtc_code:
-            return jsonify({"error": "Missing 'vin' or 'dtc_code'"}), 400
-
-        if vin and dtc_code:
-            return jsonify({"error": "Provide either 'vin' or 'dtc_code', not both"}), 400
 
         device = Device.query.get(device_id)
         if not device:
             return jsonify({"error": f"Device {device_id} not found"}), 404
 
-        # --- Spracovanie VIN ---
+        # -----------------------------------
+        # 1️⃣ NOVÁ LOGIKA: CLEAR_DTCS potvrdenie
+        # -----------------------------------
+        if clear_status is not None:
+            state = DeviceVehicle.query.filter_by(device_id=device_id).first()
+
+            if not state or not state.last_vin_id:
+                return jsonify({"error": "No VIN associated for clear"}), 400
+
+            if clear_status == "ok":
+                DTCCodeActive.query.filter_by(vin_id=state.last_vin_id).delete()
+                db.session.commit()
+
+                return jsonify({
+                    "status": "DTC cleared",
+                    "vin_id": state.last_vin_id
+                }), 200
+            
+            return jsonify({"status": "Clear failed"}), 200
+
+        # -----------------------------------
+        # 2️⃣ Pôvodné spracovanie VIN
+        # -----------------------------------
         if vin:
             vin = vin.strip().upper()
             if len(vin) != 17:
@@ -737,10 +739,8 @@ def receive_can_packet():
                 db.session.add(vehicle)
                 db.session.commit()
 
-            # ✅ Device sa automaticky označí ako online
             device.status = True
 
-            # Aktualizuj last_vin_id pre device
             state = DeviceVehicle.query.filter_by(device_id=device_id).first()
             if not state:
                 state = DeviceVehicle(device_id=device_id, last_vin_id=vehicle.id)
@@ -749,17 +749,18 @@ def receive_can_packet():
                 state.last_vin_id = vehicle.id
 
             db.session.commit()
+
             return jsonify({
                 "status": "VIN stored",
-                "vin": vin,
-                "device_status": "Online"
+                "vin": vin
             }), 201
 
-        # --- Spracovanie DTC ---
+        # -----------------------------------
+        # 3️⃣ Pôvodné spracovanie DTC
+        # -----------------------------------
         if dtc_code:
             dtc_code = dtc_code.strip().upper()
 
-            # Získaj aktuálny VIN pre daný device
             state = DeviceVehicle.query.filter_by(device_id=device_id).first()
             if not state or not state.last_vin_id:
                 return jsonify({"error": "No VIN associated with this device"}), 400
@@ -768,18 +769,13 @@ def receive_can_packet():
             if not vehicle:
                 return jsonify({"error": "Vehicle not found"}), 404
 
-            # Ulož DTC
-            # Uloženie DTC do history (vždy)
             dtc_history = DTCCodeHistory(vin_id=vehicle.id, dtc_code=dtc_code)
             db.session.add(dtc_history)
-            
-            # Uloženie DTC do active (najnovšie chyby)
-            # Najskôr zmaž staré záznamy pre rovnaký VIN a rovnaký kód
+
             DTCCodeActive.query.filter_by(vin_id=vehicle.id, dtc_code=dtc_code).delete()
             db.session.add(DTCCodeActive(vin_id=vehicle.id, dtc_code=dtc_code))
+            
             db.session.commit()
-
-
 
             return jsonify({
                 "status": "DTC stored",
