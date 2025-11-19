@@ -522,6 +522,67 @@ def load_dtc_codes_from_csv():
         db.session.rollback()
         return jsonify({"error": str(e)}), 500
 
+@app.route("/api/connect", methods=["POST"])
+def device_connect_syn():
+    """
+    1. RPi posiela SYN => my pošleme SYN-ACK
+    """
+    try:
+        data = request.get_json()
+        device_id = data.get("device_id")
+
+        if not device_id:
+            return jsonify({"error": "missing device_id"}), 400
+
+        # ak device existuje len aktualizujeme handshake state
+        device = Device.query.get(device_id)
+        if not device:
+            device = Device(id=device_id, status=False)
+            db.session.add(device)
+
+        # uložíme že SYN prišiel (zatiaľ OFFLINE)
+        device.status = False  
+        db.session.commit()
+
+        return jsonify({
+            "handshake": "SYN-ACK",
+            "device_id": device_id
+        }), 200
+
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route("/api/connect/ack", methods=["POST"])
+def device_connect_ack():
+    """
+    2. RPi odpovedá ACK => označíme zariadenie ako ONLINE
+    """
+    try:
+        data = request.get_json()
+        device_id = data.get("device_id")
+
+        if not device_id:
+            return jsonify({"error": "missing device_id"}), 400
+
+        device = Device.query.get(device_id)
+        if not device:
+            return jsonify({"error": "device not found"}), 404
+
+        # ACK => device teraz oficiálne online
+        device.status = True
+        db.session.commit()
+
+        return jsonify({
+            "status": "online",
+            "device_id": device_id,
+            "handshake": "ACK-complete"
+        }), 200
+
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
 
 
 @app.route("/api/dtc-description", methods=["POST"])
