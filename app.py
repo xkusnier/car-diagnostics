@@ -365,6 +365,7 @@ def add_device():
 
 
 
+
 @app.route("/api/device/<int:device_id>/diagnostics", methods=["GET"])
 @jwt_required()
 def device_diagnostics(device_id):
@@ -388,12 +389,18 @@ def device_diagnostics(device_id):
             return jsonify({"error": "Device not found or not owned by user"}), 404
 
         vin = None
+        year = None
+        model = None
+        engine = None
         dtcs = []
 
         if device.link and len(device.link) > 0 and device.link[0].last_vin_id:
             vin_obj = Vehicle.query.get(device.link[0].last_vin_id)
             if vin_obj:
                 vin = vin_obj.vin
+                year = vin_obj.year
+                model = vin_obj.model
+                engine = vin_obj.engine
 
                 # 🧩 Join s tabuľkou dtc_codes_meaning kvôli popisu
                 dtcs_query = (
@@ -421,6 +428,9 @@ def device_diagnostics(device_id):
             "status": "success",
             "device_id": device.id,
             "vin": vin,
+            "year": year,
+            "model": model,
+            "engine": engine,
             "dtc_codes": dtcs or [],
             "online": device.status
         }), 200
@@ -831,18 +841,18 @@ def receive_can_packet():
                     
                 db.session.add(vehicle)
                 db.session.commit()
-                else:
-                    # Aktualizujeme existujúce vozidlo
-                    updated = False
-                    if hasattr(Vehicle, 'year') and year and vehicle.year != year:
-                        vehicle.year = year
-                        updated = True
-                    if hasattr(Vehicle, 'model') and model and vehicle.model != model:
-                        vehicle.model = model  
-                        updated = True
-                    if hasattr(Vehicle, 'engine') and engine and vehicle.engine != engine:
-                        vehicle.engine = engine
-                        updated = True
+            else:
+                # ➕ Aktualizujeme existujúce vozidlo s novými informáciami
+                updated = False
+                if hasattr(Vehicle, 'year') and year and vehicle.year != year:
+                    vehicle.year = year
+                    updated = True
+                if hasattr(Vehicle, 'model') and model and vehicle.model != model:
+                    vehicle.model = model  
+                    updated = True
+                if hasattr(Vehicle, 'engine') and engine and vehicle.engine != engine:
+                    vehicle.engine = engine
+                    updated = True
                     
                 if updated:
                     db.session.commit()
@@ -897,7 +907,6 @@ def receive_can_packet():
     except Exception as e:
         db.session.rollback()
         return jsonify({"error": str(e)}), 500
-
 
 
 @app.route("/api/dtc-history/<vin>", methods=["GET"])
