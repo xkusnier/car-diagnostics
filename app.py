@@ -316,6 +316,46 @@ def decode_vin_nhtsa():
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
+
+@app.route("/api/device/<int:device_id>/read-dtcs", methods=["POST"])
+@jwt_required()
+def read_device_dtcs(device_id):
+    """
+    Pošle príkaz GET_DTCS_PERM na zariadenie pre čítanie DTC kódov.
+    """
+    try:
+        user_id = int(get_jwt_identity())
+        user = User.query.get(user_id)
+
+        if not user:
+            return jsonify({"error": "User not found"}), 404
+
+        # Kontrola vlastníctva
+        if user.role == "admin":
+            device = Device.query.get(device_id)
+        else:
+            device = Device.query.filter_by(id=device_id, user_id=user_id).first()
+
+        if not device:
+            return jsonify({"error": "Device not found or not owned by user"}), 404
+
+        # Vytvoríme príkaz GET_DTCS_PERM
+        cmd = PendingCommand(device_id=device_id, command="GET_DTCS_PERM")
+        db.session.add(cmd)
+        db.session.commit()
+
+        return jsonify({
+            "status": "success",
+            "message": "Read DTC command sent to device",
+            "device_id": device_id,
+            "command": "GET_DTCS_PERM"
+        }), 200
+
+    except Exception as e:
+        db.session.rollback()
+        print("❌ READ DEVICE DTCS ERROR:", e)
+        return jsonify({"error": str(e)}), 500
+
 @app.route("/api/add-device", methods=["POST"])
 @jwt_required()
 def add_device():
