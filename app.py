@@ -69,6 +69,7 @@ class Vehicle(db.Model):
     vin = db.Column(db.String(50), unique=True, nullable=False)
     # ➕ NOVÉ STĹPCE
     year = db.Column(db.String(10), nullable=True)
+    brand = db.Column(db.String(10), nullable=True)
     model = db.Column(db.String(100), nullable=True)
     engine = db.Column(db.String(100), nullable=True)
     
@@ -305,6 +306,7 @@ def decode_vin_nhtsa():
         return jsonify({
             "vin": vin,
             "make": vehicle_info.get("Make"),
+            "brand": vehicle_info.get("Brand"),
             "model": vehicle_info.get("Model"),
             "year": vehicle_info.get("ModelYear"),
             "engine": vehicle_info.get("EngineModel"),
@@ -390,6 +392,7 @@ def device_diagnostics(device_id):
 
         vin = None
         year = None
+        brand = None
         model = None
         engine = None
         dtcs = []
@@ -398,6 +401,7 @@ def device_diagnostics(device_id):
             vin_obj = Vehicle.query.get(device.link[0].last_vin_id)
             if vin_obj:
                 vin = vin_obj.vin
+                brand = vin_obj.brand
                 year = vin_obj.year
                 model = vin_obj.model
                 engine = vin_obj.engine
@@ -428,6 +432,7 @@ def device_diagnostics(device_id):
             "status": "success",
             "device_id": device.id,
             "vin": vin,
+            "brand": brand,
             "year": year,
             "model": model,
             "engine": engine,
@@ -789,6 +794,7 @@ def receive_can_packet():
         # ➕ NOVÉ: dodatočné informácie o vozidle
         year = payload.get("year")
         model = payload.get("model") 
+        brand = payload.get("brand")
         engine = payload.get("engine")
 
         if device_id is None:
@@ -834,6 +840,8 @@ def receive_can_packet():
                 # ✅ Pridáme nové polia AK EXISTUJÚ v modeli
                 if hasattr(Vehicle, 'year') and year:
                     vehicle.year = year
+                if hasattr(Vehicle, 'brand') and brand:
+                    vehicle.brand = brand  
                 if hasattr(Vehicle, 'model') and model:
                     vehicle.model = model  
                 if hasattr(Vehicle, 'engine') and engine:
@@ -846,6 +854,9 @@ def receive_can_packet():
                 updated = False
                 if hasattr(Vehicle, 'year') and year and vehicle.year != year:
                     vehicle.year = year
+                    updated = True
+                if hasattr(Vehicle, 'brand') and brand and vehicle.brand != brand:
+                    vehicle.brand = brand  
                     updated = True
                 if hasattr(Vehicle, 'model') and model and vehicle.model != model:
                     vehicle.model = model  
@@ -871,6 +882,7 @@ def receive_can_packet():
             return jsonify({
                 "status": "VIN stored",
                 "vin": vin,
+                "brand":brand,
                 "year": vehicle.year,
                 "model": vehicle.model, 
                 "engine": vehicle.engine
@@ -995,6 +1007,7 @@ def decode_vin_apiverve():
         cleaned = {
             "vin": vin,
             "make": data.get("make"),
+            "brand": data.get("brand"),
             "model": data.get("model"),
             "year": data.get("year"),
             "trim": data.get("trim"),
