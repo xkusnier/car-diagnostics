@@ -67,9 +67,13 @@ class Vehicle(db.Model):
     __tablename__ = "vehicles"
     id = db.Column(db.Integer, primary_key=True)
     vin = db.Column(db.String(50), unique=True, nullable=False)
+    # ➕ NOVÉ STĹPCE
+    year = db.Column(db.String(10), nullable=True)
+    model = db.Column(db.String(100), nullable=True)
+    engine = db.Column(db.String(100), nullable=True)
+    
     dtcs_active = db.relationship("DTCCodeActive", backref="vehicle", lazy=True, cascade="all, delete")
     dtcs_history = db.relationship("DTCCodeHistory", backref="vehicle", lazy=True, cascade="all, delete")
-
 
 class DTCCodeActive(db.Model):
     __tablename__ = "dtc_codes_active"
@@ -817,30 +821,28 @@ def receive_can_packet():
                 # ➕ Vytvoríme nové vozidlo s dodatočnými informáciami
                 vehicle = Vehicle(vin=vin)
                 
-                # ✅ Uložíme ročník ak je poskytnutý
-                if year:
+                # ✅ Pridáme nové polia AK EXISTUJÚ v modeli
+                if hasattr(Vehicle, 'year') and year:
                     vehicle.year = year
-                # ✅ Uložíme model ak je poskytnutý  
-                if model:
-                    vehicle.model = model
-                # ✅ Uložíme motorizáciu ak je poskytnutá
-                if engine:
+                if hasattr(Vehicle, 'model') and model:
+                    vehicle.model = model  
+                if hasattr(Vehicle, 'engine') and engine:
                     vehicle.engine = engine
                     
                 db.session.add(vehicle)
                 db.session.commit()
-            else:
-                # ➕ Aktualizujeme existujúce vozidlo s novými informáciami
-                updated = False
-                if year and vehicle.year != year:
-                    vehicle.year = year
-                    updated = True
-                if model and vehicle.model != model:
-                    vehicle.model = model  
-                    updated = True
-                if engine and vehicle.engine != engine:
-                    vehicle.engine = engine
-                    updated = True
+                else:
+                    # Aktualizujeme existujúce vozidlo
+                    updated = False
+                    if hasattr(Vehicle, 'year') and year and vehicle.year != year:
+                        vehicle.year = year
+                        updated = True
+                    if hasattr(Vehicle, 'model') and model and vehicle.model != model:
+                        vehicle.model = model  
+                        updated = True
+                    if hasattr(Vehicle, 'engine') and engine and vehicle.engine != engine:
+                        vehicle.engine = engine
+                        updated = True
                     
                 if updated:
                     db.session.commit()
