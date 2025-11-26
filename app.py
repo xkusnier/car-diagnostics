@@ -772,6 +772,11 @@ def receive_can_packet():
         # ➕ NOVÉ: výsledok CLEAR_DTCS
         clear_status = payload.get("clear_status")  # "ok" alebo "fail"
 
+        # ➕ NOVÉ: dodatočné informácie o vozidle
+        year = payload.get("year")
+        model = payload.get("model") 
+        engine = payload.get("engine")
+
         if device_id is None:
             return jsonify({"error": "Missing 'device_id'"}), 400
 
@@ -800,7 +805,7 @@ def receive_can_packet():
             return jsonify({"status": "Clear failed"}), 200
 
         # -----------------------------------
-        # 2️⃣ Pôvodné spracovanie VIN
+        # 2️⃣ ROZŠÍRENÉ spracovanie VIN s dodatočnými informáciami
         # -----------------------------------
         if vin:
             vin = vin.strip().upper()
@@ -809,9 +814,36 @@ def receive_can_packet():
 
             vehicle = Vehicle.query.filter_by(vin=vin).first()
             if not vehicle:
+                # ➕ Vytvoríme nové vozidlo s dodatočnými informáciami
                 vehicle = Vehicle(vin=vin)
+                
+                # ✅ Uložíme ročník ak je poskytnutý
+                if year:
+                    vehicle.year = year
+                # ✅ Uložíme model ak je poskytnutý  
+                if model:
+                    vehicle.model = model
+                # ✅ Uložíme motorizáciu ak je poskytnutá
+                if engine:
+                    vehicle.engine = engine
+                    
                 db.session.add(vehicle)
                 db.session.commit()
+            else:
+                # ➕ Aktualizujeme existujúce vozidlo s novými informáciami
+                updated = False
+                if year and vehicle.year != year:
+                    vehicle.year = year
+                    updated = True
+                if model and vehicle.model != model:
+                    vehicle.model = model  
+                    updated = True
+                if engine and vehicle.engine != engine:
+                    vehicle.engine = engine
+                    updated = True
+                    
+                if updated:
+                    db.session.commit()
 
             device.status = True
 
@@ -826,7 +858,10 @@ def receive_can_packet():
 
             return jsonify({
                 "status": "VIN stored",
-                "vin": vin
+                "vin": vin,
+                "year": vehicle.year,
+                "model": vehicle.model, 
+                "engine": vehicle.engine
             }), 201
 
         # -----------------------------------
