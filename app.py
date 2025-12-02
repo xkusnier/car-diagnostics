@@ -729,7 +729,8 @@ def get_dtc_description():
         return jsonify({
             "status": "success",
             "dtc_code": record.dtc_code,
-            "description": record.dtc_description
+            "description": record.dtc_description,
+            "severity": severity
         }), 200
 
     except Exception as e:
