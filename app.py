@@ -11,6 +11,8 @@ from io import StringIO
 from flask import jsonify
 from datetime import datetime, timedelta
 from flask_jwt_extended import JWTManager, create_access_token, jwt_required, get_jwt_identity  # Overenie importu
+from openai import OpenAI
+import os
 
 
 
@@ -122,7 +124,40 @@ from flask import Flask, jsonify, request
 # ============================
 # 🔐 3-WAY HANDSHAKE (SYN, SYN-ACK, ACK)
 # ============================
+openai_client = OpenAI(
+    api_key=os.getenv("OPENAI_API_KEY")
+)
 
+def ai_detect_severity(description: str) -> str:
+    """
+    Vráti: critical | medium | low
+    """
+
+    prompt = f"""
+Analyze automotive DTC description and return only ONE word:
+critical, medium or low.
+
+Rules:
+- critical = safety risk, fire risk, engine damage, braking, airbags
+- medium = drivability issues, misfire, emissions
+- low = sensors, comfort systems, minor issues
+
+DTC description:
+"{description}"
+"""
+
+    response = openai_client.responses.create(
+        model="gpt-5-nano",
+        input=prompt,
+        max_output_tokens=5
+    )
+
+    result = response.output_text.strip().lower()
+
+    if result not in ["critical", "medium", "low"]:
+        return "medium"
+
+    return result
 @app.route("/api/connect", methods=["POST"])
 def device_connect_syn():
     """
