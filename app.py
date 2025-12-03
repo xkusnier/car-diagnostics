@@ -12,8 +12,11 @@ from flask import jsonify
 from datetime import datetime, timedelta
 from flask_jwt_extended import JWTManager, create_access_token, jwt_required, get_jwt_identity  # Overenie importu
 from openai import OpenAI
-import os
 
+groq_client = OpenAI(
+    base_url="https://api.groq.com/openai/v1",
+    api_key=os.getenv("GROQ_API_KEY")
+)
 
 
 app = Flask(__name__)
@@ -83,14 +86,18 @@ class DTCCodeActive(db.Model):
     id = db.Column(db.Integer, primary_key=True)
     vin_id = db.Column(db.Integer, db.ForeignKey("vehicles.id"), nullable=False)
     dtc_code = db.Column(db.String(20), nullable=False)
+    severity = db.Column(db.String(20), nullable=False, default="medium")
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
+
 
 class DTCCodeHistory(db.Model):
     __tablename__ = "dtc_codes_history"
     id = db.Column(db.Integer, primary_key=True)
     vin_id = db.Column(db.Integer, db.ForeignKey("vehicles.id"), nullable=False)
     dtc_code = db.Column(db.String(20), nullable=False)
+    severity = db.Column(db.String(20), nullable=False, default="medium")
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
+
 
 # PRIDAJ SEM – hneď za class DTCCode(db.Model): ...
 class PendingCommand(db.Model):
@@ -124,40 +131,39 @@ from flask import Flask, jsonify, request
 # ============================
 # 🔐 3-WAY HANDSHAKE (SYN, SYN-ACK, ACK)
 # ============================
-openai_client = OpenAI(
-    api_key=os.getenv("OPENAI_API_KEY")
-)
+def ai_detect_severity(description):
+    try:
+        prompt = f"""
+You are an automotive diagnostic assistant.
 
-def ai_detect_severity(description: str) -> str:
-    """
-    Vráti: critical | medium | low
-    """
+Classify severity of the DTC description into:
+- critical
+- medium
+- low
 
-    prompt = f"""
-Analyze automotive DTC description and return only ONE word:
-critical, medium or low.
+Return only one word.
 
-Rules:
-- critical = safety risk, fire risk, engine damage, braking, airbags
-- medium = drivability issues, misfire, emissions
-- low = sensors, comfort systems, minor issues
-
-DTC description:
-"{description}"
+Description:
+{description}
 """
 
-    response = openai_client.responses.create(
-        model="gpt-5-nano",
-        input=prompt,
-        max_output_tokens=5
-    )
+        response = groq_client.chat.completions.create(
+            model="llama3-70b-8192",
+            messages=[{"role": "user", "content": prompt}],
+            temperature=0
+        )
 
-    result = response.output_text.strip().lower()
+        value = response.choices[0].message.content.strip().lower()
 
-    if result not in ["critical", "medium", "low"]:
+        if value not in ["critical", "medium", "low"]:
+            return "medium"
+
+        return value
+    except Exception as e:
+        print("⚠️ AI severity error:", e)
         return "medium"
 
-    return result
+
 @app.route("/api/connect", methods=["POST"])
 def device_connect_syn():
     """
@@ -485,6 +491,7 @@ def device_diagnostics(device_id):
                 dtcs_query = (
                     db.session.query(
                         DTCCodeActive.dtc_code,
+                        DTCCodeActive.severity,
                         DTCCodeActive.created_at,
                         DtcCodeMeaning.dtc_description
                     )
@@ -498,7 +505,8 @@ def device_diagnostics(device_id):
                     {
                         "dtc_code": d.dtc_code,
                         "description": d.dtc_description or "No description",
-                        "created_at": d.created_at.isoformat() if d.created_at else None,
+                        "severity": d.severity,
+                        "created_at": d.created_at.isoformat(),
                     }
                     for d in dtcs_query
                 ]
@@ -729,8 +737,7 @@ def get_dtc_description():
         return jsonify({
             "status": "success",
             "dtc_code": record.dtc_code,
-            "description": record.dtc_description,
-            "severity": severity
+            "description": record.dtc_description
         }), 200
 
     except Exception as e:
@@ -965,36 +972,61 @@ def receive_can_packet():
             }), 201
 
         # -----------------------------------
-        # 3️⃣ Pôvodné spracovanie DTC
+        # 3️⃣ Pôvodné spracovanie DTC (S AI SEVERITY)
         # -----------------------------------
         if dtc_code:
             dtc_code = dtc_code.strip().upper()
-
+        
             state = DeviceVehicle.query.filter_by(device_id=device_id).first()
             if not state or not state.last_vin_id:
                 return jsonify({"error": "No VIN associated with this device"}), 400
-
+        
             vehicle = Vehicle.query.get(state.last_vin_id)
             if not vehicle:
                 return jsonify({"error": "Vehicle not found"}), 404
-
-            dtc_history = DTCCodeHistory(vin_id=vehicle.id, dtc_code=dtc_code)
-            db.session.add(dtc_history)
-
-            DTCCodeActive.query.filter_by(vin_id=vehicle.id, dtc_code=dtc_code).delete()
-            db.session.add(DTCCodeActive(vin_id=vehicle.id, dtc_code=dtc_code))
-            
+        
+            # Nájdeme popis DTC
+            meaning = DtcCodeMeaning.query.filter(
+                db.func.lower(DtcCodeMeaning.dtc_code) == dtc_code.lower()
+            ).first()
+        
+            description = meaning.dtc_description if meaning else ""
+        
+            # 🧠 Spočítame severity raz
+            severity = ai_detect_severity(description)
+        
+            # HISTÓRIA
+            db.session.add(
+                DTCCodeHistory(
+                    vin_id=vehicle.id,
+                    dtc_code=dtc_code,
+                    severity=severity
+                )
+            )
+        
+            # AKTÍVNE — replace
+            DTCCodeActive.query.filter_by(
+                vin_id=vehicle.id,
+                dtc_code=dtc_code
+            ).delete()
+        
+            db.session.add(
+                DTCCodeActive(
+                    vin_id=vehicle.id,
+                    dtc_code=dtc_code,
+                    severity=severity
+                )
+            )
+        
             db.session.commit()
-
+        
             return jsonify({
                 "status": "DTC stored",
                 "vin": vehicle.vin,
-                "dtc": dtc_code
+                "dtc": dtc_code,
+                "severity": severity
             }), 201
 
-    except Exception as e:
-        db.session.rollback()
-        return jsonify({"error": str(e)}), 500
 
 
 @app.route("/api/dtc-history/<vin>", methods=["GET"])
