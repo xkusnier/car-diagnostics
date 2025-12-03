@@ -1027,6 +1027,12 @@ def receive_can_packet():
                 "severity": severity
             }), 201
 
+    except Exception as e:
+        db.session.rollback()
+        print("❌ CAN PACKET ERROR:", e)
+        return jsonify({"error": str(e)}), 500
+
+
 
 
 @app.route("/api/dtc-history/<vin>", methods=["GET"])
