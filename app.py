@@ -179,13 +179,13 @@ def ai_detect_severity(description):
 
         if value not in ["critical", "medium", "low"]:
             print("⚠️ AI INVALID:", value)
-            return "medium"
+            return "AI INVALID"
 
         return value
 
     except Exception as e:
         print("❌ AI SEVERITY ERROR:", str(e))
-        return "medium"
+        return "AI SEVERITY ERROR"
 
 
 @app.route("/api/connect", methods=["POST"])
