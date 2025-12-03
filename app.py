@@ -168,9 +168,16 @@ def ai_detect_severity(description):
         r.raise_for_status()
 
         data = r.json()
-        value = data["choices"][0]["message"]["content"].strip().lower()
 
-        if value not in ["critical","medium","low"]:
+        # ✅ OPRAVA: message.content je LIST
+        raw_content = data["choices"][0]["message"]["content"]
+
+        if isinstance(raw_content, list):
+            value = raw_content[0]["text"].strip().lower()
+        else:
+            value = raw_content.strip().lower()
+
+        if value not in ["critical", "medium", "low"]:
             print("⚠️ AI INVALID:", value)
             return "medium"
 
@@ -178,7 +185,8 @@ def ai_detect_severity(description):
 
     except Exception as e:
         print("❌ AI SEVERITY ERROR:", str(e))
-        return "aiError"
+        return "medium"
+
 
 @app.route("/api/connect", methods=["POST"])
 def device_connect_syn():
