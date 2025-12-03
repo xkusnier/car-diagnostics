@@ -118,6 +118,82 @@ def home():
 import requests
 from flask import Flask, jsonify, request
 
+# ============================
+# 🔍 DTC SEVERITY KEYWORD RULE ENGINE
+# ============================
+
+SEVERITY_RULES = {
+    "critical": [
+        "misfire",
+        "overheat",
+        "overheating",
+        "engine stall",
+        "oil pressure",
+        "low oil",
+        "no oil",
+        "coolant leak",
+        "fuel leak",
+        "knock",
+        "detonation",
+        "cylinder disabled",
+        "short circuit",
+        "high voltage",
+        "overvoltage",
+        "fire risk",
+        "brake failure",
+        "loss of power"
+    ],
+
+    "medium": [
+        "sensor",
+        "o2 sensor",
+        "oxygen sensor",
+        "egr",
+        "maf",
+        "camshaft",
+        "crankshaft",
+        "emission",
+        "catalyst",
+        "fuel trim",
+        "air intake",
+        "misalignment",
+        "communication",
+        "voltage range"
+    ],
+
+    "low": [
+        "comfort",
+        "signal",
+        "interior",
+        "lamp",
+        "bulb",
+        "switch",
+        "mirror",
+        "door",
+        "seat",
+        "window",
+        "radio",
+        "infotainment"
+    ]
+}
+
+
+def detect_severity_from_keywords(description: str) -> str:
+    """
+    Heuristická analýza textu DTC popisu
+    """
+    if not description:
+        return "medium"
+
+    text = description.lower()
+
+    # priority → CRITICAL > MEDIUM > LOW
+    for severity, keywords in SEVERITY_RULES.items():
+        for kw in keywords:
+            if kw in text:
+                return severity
+
+    return "medium"
 
 # ============================
 # 🔐 3-WAY HANDSHAKE (SYN, SYN-ACK, ACK)
@@ -463,7 +539,8 @@ def device_diagnostics(device_id):
                     {
                         "dtc_code": d.dtc_code,
                         "description": d.dtc_description or "No description",
-                        "created_at": d.created_at.isoformat() if d.created_at else None,
+                        "severity": detect_severity_from_keywords(d.dtc_description or ""),
+                        "created_at": d.created_at.isoformat() if d.created_at else None
                     }
                     for d in dtcs_query
                 ]
@@ -931,30 +1008,60 @@ def receive_can_packet():
         # -----------------------------------
         # 3️⃣ Pôvodné spracovanie DTC
         # -----------------------------------
+        # -----------------------------------
+        # 3️⃣ SPRACOVANIE DTC + SEVERITY (KEYWORDS)
+        # -----------------------------------
         if dtc_code:
             dtc_code = dtc_code.strip().upper()
-
+        
             state = DeviceVehicle.query.filter_by(device_id=device_id).first()
             if not state or not state.last_vin_id:
                 return jsonify({"error": "No VIN associated with this device"}), 400
-
+        
             vehicle = Vehicle.query.get(state.last_vin_id)
             if not vehicle:
                 return jsonify({"error": "Vehicle not found"}), 404
-
-            dtc_history = DTCCodeHistory(vin_id=vehicle.id, dtc_code=dtc_code)
-            db.session.add(dtc_history)
-
-            DTCCodeActive.query.filter_by(vin_id=vehicle.id, dtc_code=dtc_code).delete()
-            db.session.add(DTCCodeActive(vin_id=vehicle.id, dtc_code=dtc_code))
-            
+        
+            # 🔎 DTC popis z DB
+            meaning = DtcCodeMeaning.query.filter(
+                db.func.lower(DtcCodeMeaning.dtc_code) == dtc_code.lower()
+            ).first()
+        
+            description = meaning.dtc_description if meaning else ""
+        
+            # ✅ URČENIE SEVERITY LOKÁLNE
+            severity = detect_severity_from_keywords(description)
+        
+            # HISTÓRIA
+            db.session.add(
+                DTCCodeHistory(
+                    vin_id=vehicle.id,
+                    dtc_code=dtc_code
+                )
+            )
+        
+            # AKTÍVNE
+            DTCCodeActive.query.filter_by(
+                vin_id=vehicle.id,
+                dtc_code=dtc_code
+            ).delete()
+        
+            db.session.add(
+                DTCCodeActive(
+                    vin_id=vehicle.id,
+                    dtc_code=dtc_code
+                )
+            )
+        
             db.session.commit()
-
+        
             return jsonify({
                 "status": "DTC stored",
                 "vin": vehicle.vin,
-                "dtc": dtc_code
+                "dtc": dtc_code,
+                "severity": severity
             }), 201
+
 
     except Exception as e:
         db.session.rollback()
