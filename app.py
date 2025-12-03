@@ -131,38 +131,54 @@ from flask import Flask, jsonify, request
 # ============================
 # 🔐 3-WAY HANDSHAKE (SYN, SYN-ACK, ACK)
 # ============================
+import requests
+
 def ai_detect_severity(description):
     try:
-        prompt = f"""
-You are an automotive diagnostic assistant.
+        if not description:
+            return "medium"
 
-Classify severity of the DTC description into:
-- critical
-- medium
-- low
+        url = "https://api.groq.com/openai/v1/chat/completions"
 
-Return only one word.
+        headers = {
+            "Authorization": f"Bearer {os.environ['GROQ_API_KEY']}",
+            "Content-Type": "application/json"
+        }
 
-Description:
-{description}
-"""
+        payload = {
+            "model": "llama3-70b-8192",
+            "messages": [
+                {
+                    "role": "system",
+                    "content": "You are an automotive diagnostic assistant. Return only one word: critical, medium or low."
+                },
+                {
+                    "role": "user",
+                    "content": f"Classify severity:\n{description}"
+                }
+            ],
+            "temperature": 0
+        }
 
-        response = groq_client.chat.completions.create(
-            model="llama3-70b-8192",
-            messages=[{"role": "user", "content": prompt}],
-            temperature=0
-        )
+        r = requests.post(url, headers=headers, json=payload, timeout=10)
 
-        value = response.choices[0].message.content.strip().lower()
+        print("📡 GROQ STATUS:", r.status_code)
+        print("📡 GROQ RAW:", r.text)
 
-        if value not in ["critical", "medium", "low"]:
-            return "valueNotIn"
+        r.raise_for_status()
+
+        data = r.json()
+        value = data["choices"][0]["message"]["content"].strip().lower()
+
+        if value not in ["critical","medium","low"]:
+            print("⚠️ AI INVALID:", value)
+            return "medium"
 
         return value
-    except Exception as e:
-        print("⚠️ AI severity error:", e)
-        return "aiError"
 
+    except Exception as e:
+        print("❌ AI SEVERITY ERROR:", str(e))
+        return "aiError"
 
 @app.route("/api/connect", methods=["POST"])
 def device_connect_syn():
