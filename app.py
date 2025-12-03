@@ -156,12 +156,12 @@ Description:
         value = response.choices[0].message.content.strip().lower()
 
         if value not in ["critical", "medium", "low"]:
-            return "medium"
+            return "valueNotIn"
 
         return value
     except Exception as e:
         print("⚠️ AI severity error:", e)
-        return "medium"
+        return "aiError"
 
 
 @app.route("/api/connect", methods=["POST"])
