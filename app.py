@@ -484,6 +484,7 @@ def device_diagnostics(device_id):
                     db.session.query(
                         DTCCodeActive.dtc_code,
                         DTCCodeActive.created_at,
+                        DTCCodeActive.severity,  # 👈 PRIDANÉ
                         DtcCodeMeaning.dtc_description
                     )
                     .outerjoin(DtcCodeMeaning, DTCCodeActive.dtc_code == DtcCodeMeaning.dtc_code)
@@ -496,6 +497,7 @@ def device_diagnostics(device_id):
                     {
                         "dtc_code": d.dtc_code,
                         "description": d.dtc_description or "No description",
+                        "severity": d.severity or "medium",  # 👈 PRIDANÉ
                         "created_at": d.created_at.isoformat() if d.created_at else None,
                     }
                     for d in dtcs_query
