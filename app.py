@@ -106,6 +106,26 @@ class DtcCodeMeaning(db.Model):
     id = db.Column(db.Integer, primary_key=True)
     dtc_code = db.Column(db.String(20), unique=True, nullable=False)
     dtc_description = db.Column(db.Text, nullable=True)
+# =========================
+# 🔗 DTC PATTERN DATABASE
+# =========================
+
+class DtcPattern(db.Model):
+    __tablename__ = "dtc_patterns"
+
+    id = db.Column(db.Integer, primary_key=True)
+    name = db.Column(db.String(120), nullable=False)
+    primary_cause = db.Column(db.String(255), nullable=False)
+    confidence = db.Column(db.Integer, default=80)
+
+class DtcPatternLink(db.Model):
+    __tablename__ = "dtc_pattern_links"
+
+    id = db.Column(db.Integer, primary_key=True)
+    pattern_id = db.Column(db.Integer, db.ForeignKey("dtc_patterns.id"), nullable=False)
+    dtc_code = db.Column(db.String(20), nullable=False)
+
+
 
 @app.route("/init-db")
 def init_db():
@@ -215,6 +235,60 @@ def device_connect_ack():
         return jsonify({"error": str(e)}), 500
 
 
+@app.route("/api/dtc/pattern-check/<vin>", methods=["GET"])
+@jwt_required(optional=True)
+def check_dtc_patterns(vin):
+    """
+    Skontroluje DTC kombinácie k VIN a vráti
+    IBA tie patterny, ktoré sú SPLNENÉ NA 100 %.
+    """
+
+    vehicle = Vehicle.query.filter_by(vin=vin.upper()).first()
+    if not vehicle:
+        return jsonify({"error": "Vehicle not found"}), 404
+
+    # Aktívne DTC vozidla
+    active_dtcs = set(
+        d.dtc_code.upper()
+        for d in DTCCodeActive.query.filter_by(vin_id=vehicle.id)
+    )
+
+    if not active_dtcs:
+        return jsonify({
+            "vin": vin,
+            "active_dtcs": [],
+            "matched_patterns": [],
+            "message": "Vehicle has no active DTC codes"
+        }), 200
+
+    matched_patterns = []
+
+    patterns = DtcPattern.query.all()
+
+    for pattern in patterns:
+
+        pattern_codes = set(
+            l.dtc_code.upper()
+            for l in DtcPatternLink.query.filter_by(pattern_id=pattern.id)
+        )
+
+        # presná zhoda: všetky DTC z patternu musia existovať
+        if pattern_codes.issubset(active_dtcs):
+
+            matched_patterns.append({
+                "pattern_id": pattern.id,
+                "pattern_name": pattern.name,
+                "primary_cause": pattern.primary_cause,
+                "confidence": pattern.confidence,
+                "required_codes": list(pattern_codes),
+                "vehicle_codes": list(active_dtcs)
+            })
+
+    return jsonify({
+        "vin": vin,
+        "active_dtc_codes": list(active_dtcs),
+        "matched_patterns": matched_patterns
+    }), 200
 
 
 
