@@ -1257,50 +1257,48 @@ def _iso(ts: datetime | None) -> str | None:
     # UTC-ish ISO without timezone conversion (keď chceš presne Z, ulož UTC a pridaj "Z")
     return ts.replace(microsecond=0).isoformat() + "Z"
 
-
 # =========================
-# ✅ DEVICE TELEMETRY ENDPOINTS (READ)
+# ✅ LIVE DATA GET ENDPOINTS (LAST KNOWN VALUE)
 # =========================
 
 @app.route("/api/device/<int:device_id>/odometer", methods=["GET"])
 @jwt_required()
 def get_device_odometer(device_id):
-    telem = _get_latest_telemetry(device_id)
-    if not telem or telem.odometer is None:
+    t = _get_latest_telemetry(device_id)
+    if not t or t.odometer is None:
         return jsonify({"error": "No odometer data"}), 404
 
     return jsonify({
         "status": "success",
         "device_id": device_id,
-        "odometer": telem.odometer,
-        "timestamp": _iso(telem.created_at)
+        "odometer": int(t.odometer),
+        "timestamp": _iso(t.created_at)
     }), 200
 
 
 @app.route("/api/device/<int:device_id>/battery", methods=["GET"])
 @jwt_required()
 def get_device_battery(device_id):
-    telem = _get_latest_telemetry(device_id)
-    if not telem or telem.battery_voltage is None:
+    t = _get_latest_telemetry(device_id)
+    if not t or t.battery_voltage is None:
         return jsonify({"error": "No battery data"}), 404
 
     return jsonify({
         "status": "success",
         "device_id": device_id,
-        "battery_voltage": float(telem.battery_voltage),
-        "health": telem.battery_health or "unknown",
-        "timestamp": _iso(telem.created_at)
+        "battery_voltage": float(t.battery_voltage),
+        "health": t.battery_health or "unknown",
+        "timestamp": _iso(t.created_at)
     }), 200
 
 
 @app.route("/api/device/<int:device_id>/engine", methods=["GET"])
 @jwt_required()
 def get_device_engine(device_id):
-    telem = _get_latest_telemetry(device_id)
-    # stačí aby existoval aspoň jeden engine field
-    if not telem or all(v is None for v in [
-        telem.engine_running, telem.engine_rpm, telem.engine_load,
-        telem.coolant_temp, telem.oil_temp, telem.intake_air_temp
+    t = _get_latest_telemetry(device_id)
+    if not t or all(v is None for v in [
+        t.engine_running, t.engine_rpm, t.engine_load,
+        t.coolant_temp, t.oil_temp, t.intake_air_temp
     ]):
         return jsonify({"error": "No engine data"}), 404
 
@@ -1308,23 +1306,23 @@ def get_device_engine(device_id):
         "status": "success",
         "device_id": device_id,
         "engine": {
-            "running": bool(telem.engine_running) if telem.engine_running is not None else None,
-            "rpm": telem.engine_rpm,
-            "load": telem.engine_load,
-            "coolant_temp": telem.coolant_temp,
-            "oil_temp": telem.oil_temp,
-            "intake_air_temp": telem.intake_air_temp
+            "running": bool(t.engine_running) if t.engine_running is not None else None,
+            "rpm": t.engine_rpm,
+            "load": t.engine_load,
+            "coolant_temp": t.coolant_temp,
+            "oil_temp": t.oil_temp,
+            "intake_air_temp": t.intake_air_temp
         },
-        "timestamp": _iso(telem.created_at)
+        "timestamp": _iso(t.created_at)
     }), 200
 
 
 @app.route("/api/device/<int:device_id>/fuel", methods=["GET"])
 @jwt_required()
 def get_device_fuel(device_id):
-    telem = _get_latest_telemetry(device_id)
-    if not telem or all(v is None for v in [
-        telem.consumption_lh, telem.consumption_l100km, telem.maf, telem.fuel_type
+    t = _get_latest_telemetry(device_id)
+    if not t or all(v is None for v in [
+        t.consumption_lh, t.consumption_l100km, t.maf, t.fuel_type
     ]):
         return jsonify({"error": "No fuel data"}), 404
 
@@ -1332,77 +1330,28 @@ def get_device_fuel(device_id):
         "status": "success",
         "device_id": device_id,
         "fuel": {
-            "consumption_lh": telem.consumption_lh,
-            "consumption_l100km": telem.consumption_l100km,
-            "maf": telem.maf,
-            "type": telem.fuel_type or "unknown"
+            "consumption_lh": t.consumption_lh,
+            "consumption_l100km": t.consumption_l100km,
+            "maf": t.maf,
+            "type": t.fuel_type or "unknown"
         },
-        "timestamp": _iso(telem.created_at)
+        "timestamp": _iso(t.created_at)
     }), 200
 
 
 @app.route("/api/device/<int:device_id>/speed", methods=["GET"])
 @jwt_required()
 def get_device_speed(device_id):
-    telem = _get_latest_telemetry(device_id)
-    if not telem or telem.speed is None:
+    t = _get_latest_telemetry(device_id)
+    if not t or t.speed is None:
         return jsonify({"error": "No speed data"}), 404
 
     return jsonify({
         "status": "success",
         "device_id": device_id,
-        "speed": telem.speed,
-        "timestamp": _iso(telem.created_at)
+        "speed": int(t.speed),
+        "timestamp": _iso(t.created_at)
     }), 200
-
-
-# =========================
-# ✅ DEVICE TELEMETRY INGEST (DEVICE -> SERVER)
-# =========================
-# Toto je dôležité, inak nebude mať server čo vracať.
-# RPi to môže posielať napr. každých X sekúnd cez HTTP POST.
-@app.route("/api/device/<int:device_id>/telemetry", methods=["POST"])
-def ingest_telemetry(device_id):
-    """
-    RPi pošle telemetriu naraz v jednom JSONe.
-    """
-    try:
-        payload = request.get_json() or {}
-
-        # voliteľné sekcie
-        engine = payload.get("engine") or {}
-        fuel = payload.get("fuel") or {}
-
-        t = DeviceTelemetry(
-            device_id=device_id,
-            odometer=payload.get("odometer"),
-
-            battery_voltage=payload.get("battery_voltage"),
-            battery_health=payload.get("health"),
-
-            engine_running=engine.get("running"),
-            engine_rpm=engine.get("rpm"),
-            engine_load=engine.get("load"),
-            coolant_temp=engine.get("coolant_temp"),
-            oil_temp=engine.get("oil_temp"),
-            intake_air_temp=engine.get("intake_air_temp"),
-
-            consumption_lh=fuel.get("consumption_lh"),
-            consumption_l100km=fuel.get("consumption_l100km"),
-            maf=fuel.get("maf"),
-            fuel_type=fuel.get("type"),
-
-            speed=payload.get("speed"),
-        )
-
-        db.session.add(t)
-        db.session.commit()
-
-        return jsonify({"status": "success", "device_id": device_id}), 201
-
-    except Exception as e:
-        db.session.rollback()
-        return jsonify({"error": str(e)}), 500
 
 
 # VSETKO ZOBRAZ GET
