@@ -24,46 +24,16 @@ swagger_template = {
     "swagger": "2.0",
     "info": {
         "title": "Car Diagnostics API",
-        "description": "Backend API for device (RPi) + web dashboard. Includes REST + Socket.IO events.",
-        "version": "1.0.0",
+        "description": "REST API for RPi device and web dashboard",
+        "version": "1.0.0"
     },
     "basePath": "/",
     "schemes": ["http", "https"],
-    "securityDefinitions": {
-        "BearerAuth": {
-            "type": "apiKey",
-            "name": "Authorization",
-            "in": "header",
-            "description": "JWT Authorization header. Example: `Bearer <token>`",
-        }
-    },
-    "tags": [
-        {"name": "Health", "description": "Health & DB init"},
-        {"name": "Auth", "description": "Login/Register"},
-        {"name": "Devices", "description": "Devices & diagnostics"},
-        {"name": "Commands", "description": "Pending commands & heartbeat"},
-        {"name": "CAN", "description": "RPi ingest (VIN/DTC/Clear/Telemetry snapshot)"},
-        {"name": "Telemetry", "description": "Last known telemetry (JWT)"},
-        {"name": "DTC", "description": "DTC meanings, patterns, history"},
-        {"name": "VIN", "description": "VIN decoding"},
-        {"name": "Admin", "description": "Admin-only-ish utilities"},
-        {"name": "Socket.IO", "description": "Realtime events (documentation only)"},
-    ],
 }
-swagger_config = {
-    "headers": [],
-    "specs": [
-        {
-            "endpoint": "apispec_1",
-            "route": "/apidocs/apispec_1.json",
-            "rule_filter": lambda rule: True,
-            "model_filter": lambda tag: True,
-        }
-    ],
-    "static_url_path": "/flasgger_static",
-    "swagger_ui": True,
-    "specs_route": "/apidocs/",
-}
+
+swagger = Swagger(app, template=swagger_template)
+
+
 swagger = Swagger(app, template=swagger_template, config=swagger_config)
 
 # ✅ Socket.IO init (WS)
