@@ -1,6 +1,6 @@
 from flask import Flask, request, jsonify
 from flask_sqlalchemy import SQLAlchemy
-from flasgger import Swagger
+from flasgger import Swagger, swag_from
 from datetime import datetime, timedelta
 import os
 import requests
@@ -15,15 +15,59 @@ import eventlet
 eventlet.monkey_patch()
 
 app = Flask(__name__)
-CORS(app)  # klasické CORS pre REST
-swagger = Swagger(app)
+CORS(app)
 
-# ✅ NEW: Socket.IO init (WS)
-socketio = SocketIO(
-    app,
-    cors_allowed_origins="*",
-    async_mode="eventlet"
-)
+# =========================
+# ✅ SWAGGER CONFIG
+# =========================
+swagger_template = {
+    "swagger": "2.0",
+    "info": {
+        "title": "Car Diagnostics API",
+        "description": "Backend API for device (RPi) + web dashboard. Includes REST + Socket.IO events.",
+        "version": "1.0.0",
+    },
+    "basePath": "/",
+    "schemes": ["http", "https"],
+    "securityDefinitions": {
+        "BearerAuth": {
+            "type": "apiKey",
+            "name": "Authorization",
+            "in": "header",
+            "description": "JWT Authorization header. Example: `Bearer <token>`",
+        }
+    },
+    "tags": [
+        {"name": "Health", "description": "Health & DB init"},
+        {"name": "Auth", "description": "Login/Register"},
+        {"name": "Devices", "description": "Devices & diagnostics"},
+        {"name": "Commands", "description": "Pending commands & heartbeat"},
+        {"name": "CAN", "description": "RPi ingest (VIN/DTC/Clear/Telemetry snapshot)"},
+        {"name": "Telemetry", "description": "Last known telemetry (JWT)"},
+        {"name": "DTC", "description": "DTC meanings, patterns, history"},
+        {"name": "VIN", "description": "VIN decoding"},
+        {"name": "Admin", "description": "Admin-only-ish utilities"},
+        {"name": "Socket.IO", "description": "Realtime events (documentation only)"},
+    ],
+}
+swagger_config = {
+    "headers": [],
+    "specs": [
+        {
+            "endpoint": "apispec_1",
+            "route": "/apidocs/apispec_1.json",
+            "rule_filter": lambda rule: True,
+            "model_filter": lambda tag: True,
+        }
+    ],
+    "static_url_path": "/flasgger_static",
+    "swagger_ui": True,
+    "specs_route": "/apidocs/",
+}
+swagger = Swagger(app, template=swagger_template, config=swagger_config)
+
+# ✅ Socket.IO init (WS)
+socketio = SocketIO(app, cors_allowed_origins="*", async_mode="eventlet")
 
 # Konfigurácia JWT
 app.config["JWT_SECRET_KEY"] = os.environ.get("JWT_SECRET_KEY", "your-secret-key")
@@ -154,18 +198,6 @@ class DeviceTelemetry(db.Model):
     created_at = db.Column(db.DateTime, default=datetime.utcnow, index=True)
 
 # =========================
-# INIT / HEALTH
-# =========================
-@app.route("/init-db")
-def init_db():
-    db.create_all()
-    return jsonify({"status": "Database ok"})
-
-@app.route("/", methods=["GET"])
-def home():
-    return jsonify({"status": "ok", "message": "Flask bezi"})
-
-# =========================
 # SEVERITY
 # =========================
 CRITICAL_KEYWORDS = [
@@ -173,7 +205,6 @@ CRITICAL_KEYWORDS = [
     "oil pressure", "detonation", "shaft", "timing",
     "crank", "camshaft", "failure", "shutdown"
 ]
-
 LOW_KEYWORDS = [
     "lamp", "light", "interior", "seat", "mirror",
     "window", "audio", "radio", "speaker", "door",
@@ -193,7 +224,7 @@ def detect_severity_from_description(description: str) -> str:
     return "medium"
 
 # =========================
-# ✅ NEW: SOCKET.IO HELPERS
+# SOCKET.IO HELPERS
 # =========================
 def _iso(ts: datetime | None) -> str | None:
     if not ts:
@@ -201,7 +232,6 @@ def _iso(ts: datetime | None) -> str | None:
     return ts.replace(microsecond=0).isoformat() + "Z"
 
 def _telemetry_payload(device_id: int, payload: dict) -> dict:
-    # jednotný formát pre FE
     return {
         "device_id": device_id,
         "odometer": payload.get("odometer"),
@@ -213,7 +243,6 @@ def _telemetry_payload(device_id: int, payload: dict) -> dict:
     }
 
 def _save_telemetry_to_db(device_id: int, t: dict) -> None:
-    # DB je voliteľné, ale už to máš v projekte -> ulož
     try:
         battery = t.get("battery") or {}
         engine = t.get("engine") or {}
@@ -242,8 +271,13 @@ def _save_telemetry_to_db(device_id: int, t: dict) -> None:
     except Exception:
         db.session.rollback()
 
+def _jwt_security(optional: bool = False):
+    # Flasgger security block helper
+    # optional=True => don't show as required, but still documents BearerAuth
+    return [] if optional else [{"BearerAuth": []}]
+
 # =========================
-# ✅ NEW: SOCKET.IO EVENTS
+# SOCKET.IO EVENTS (docs-only in swagger via /api/ws-doc)
 # =========================
 @socketio.on("connect")
 def ws_connect():
@@ -251,24 +285,16 @@ def ws_connect():
 
 @socketio.on("subscribe_device")
 def ws_subscribe_device(data):
-    """
-    FE: socket.emit("subscribe_device", {device_id: 1})
-    """
     try:
         device_id = int(data.get("device_id"))
     except Exception:
         emit("error", {"error": "invalid device_id"})
         return
-
     join_room(f"device:{device_id}")
     emit("subscribed", {"device_id": device_id})
 
 @socketio.on("telemetry")
 def ws_telemetry(data):
-    """
-    RPi (alebo test client) posiela realtime telemetry cez WS.
-    Server to uloží + pushne FE.
-    """
     try:
         device_id = int(data.get("device_id"))
     except Exception:
@@ -280,32 +306,250 @@ def ws_telemetry(data):
         emit("error", {"error": "device not found"})
         return
 
-    # realtime payload
     t = _telemetry_payload(device_id, data)
 
-    # mark device online (keď posiela telemetry, je online)
     try:
         device.status = True
         db.session.commit()
     except Exception:
         db.session.rollback()
 
-    # uloz do DB (ak chces)
     _save_telemetry_to_db(device_id, t)
-
-    # PUSH do FE
     socketio.emit("telemetry_update", t, room=f"device:{device_id}")
     emit("telemetry_ack", {"ok": True, "timestamp": t["timestamp"]})
+
+# =========================
+# INIT / HEALTH
+# =========================
+@app.route("/init-db", methods=["GET"])
+def init_db():
+    """
+    Create DB tables (dev utility).
+    ---
+    tags: [Health]
+    responses:
+      200:
+        description: Database initialized
+        schema:
+          type: object
+          properties:
+            status:
+              type: string
+              example: Database ok
+    """
+    db.create_all()
+    return jsonify({"status": "Database ok"})
+
+@app.route("/", methods=["GET"])
+def home():
+    """
+    Health check.
+    ---
+    tags: [Health]
+    responses:
+      200:
+        description: OK
+        schema:
+          type: object
+          properties:
+            status:
+              type: string
+              example: ok
+            message:
+              type: string
+              example: Flask bezi
+    """
+    return jsonify({"status": "ok", "message": "Flask bezi"})
+
+@app.route("/api/ws-doc", methods=["GET"])
+def ws_doc():
+    """
+    Socket.IO events documentation (not real REST).
+    ---
+    tags: [Socket.IO]
+    responses:
+      200:
+        description: Socket.IO event contract
+        schema:
+          type: object
+          properties:
+            connect:
+              type: object
+            subscribe_device:
+              type: object
+            telemetry_in:
+              type: object
+            telemetry_out:
+              type: object
+    """
+    return jsonify({
+        "connect": {
+            "server_emits": [
+                {"event": "server_ready", "payload": {"status": "ok"}}
+            ]
+        },
+        "subscribe_device": {
+            "client_emits": [{"event": "subscribe_device", "payload": {"device_id": 1}}],
+            "server_emits": [{"event": "subscribed", "payload": {"device_id": 1}}],
+            "room": "device:<device_id>"
+        },
+        "telemetry_in": {
+            "client_emits": [{
+                "event": "telemetry",
+                "payload": {
+                    "device_id": 1,
+                    "odometer": 251000,
+                    "speed": 0,
+                    "battery": {"battery_voltage": 12.44, "health": "good"},
+                    "engine": {"running": False, "rpm": 0, "load": 10.0, "coolant_temp": 88, "oil_temp": 70, "intake_air_temp": 25},
+                    "fuel": {"consumption_lh": 0.0, "consumption_l100km": 0.0, "maf": 2.1, "type": "diesel"}
+                }
+            }]
+        },
+        "telemetry_out": {
+            "server_emits": [
+                {"event": "telemetry_update", "payload": {"device_id": 1, "timestamp": "2026-02-13T12:34:56Z"}},
+                {"event": "telemetry_ack", "payload": {"ok": True, "timestamp": "2026-02-13T12:34:56Z"}}
+            ]
+        }
+    }), 200
+
+# =========================
+# AUTH
+# =========================
+@app.route("/api/login", methods=["POST"])
+def login():
+    """
+    Login and get JWT token.
+    ---
+    tags: [Auth]
+    consumes: [application/json]
+    parameters:
+      - in: body
+        name: body
+        required: true
+        schema:
+          type: object
+          required: [email, password]
+          properties:
+            email:
+              type: string
+              example: user@test.com
+            password:
+              type: string
+              example: 1234
+    responses:
+      200:
+        description: JWT issued
+        schema:
+          type: object
+          properties:
+            status: {type: string, example: success}
+            access_token: {type: string, example: "<JWT>"}
+            role: {type: string, example: user}
+      400:
+        description: Missing email or password
+      401:
+        description: Invalid credentials
+    """
+    try:
+        data = request.get_json()
+        email = data.get("email")
+        password = data.get("password")
+
+        if not email or not password:
+            return jsonify({"error": "Missing email or password"}), 400
+
+        user = User.query.filter_by(email=email).first()
+        if not user or user.password != password:
+            return jsonify({"error": "Invalid credentials"}), 401
+
+        access_token = create_access_token(identity=str(user.id))
+        return jsonify({"status": "success", "access_token": access_token, "role": user.role}), 200
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+@app.route("/api/register", methods=["POST"])
+def register():
+    """
+    Register new user.
+    ---
+    tags: [Auth]
+    consumes: [application/json]
+    parameters:
+      - in: body
+        name: body
+        required: true
+        schema:
+          type: object
+          required: [email, password]
+          properties:
+            email:
+              type: string
+              example: user@test.com
+            password:
+              type: string
+              example: 1234
+    responses:
+      201:
+        description: Registered
+      409:
+        description: Email already exists
+    """
+    try:
+        data = request.get_json()
+        email = data.get("email")
+        password = data.get("password")
+
+        if not email or not password:
+            return jsonify({"error": "Missing email or password"}), 400
+
+        if User.query.filter_by(email=email).first():
+            return jsonify({"error": "Email already exists"}), 409
+
+        new_user = User(email=email, password=password, role="user")
+        db.session.add(new_user)
+        db.session.commit()
+        return jsonify({"status": "success", "message": "User registered"}), 201
+    except Exception as e:
+        db.session.rollback()
+        return jsonify({"error": str(e)}), 500
 
 # =========================
 # 3-WAY HANDSHAKE
 # =========================
 @app.route("/api/connect", methods=["POST"])
 def device_connect_syn():
+    """
+    RPi connect step 1 (SYN). Creates device if missing, sets status False.
+    ---
+    tags: [Devices]
+    consumes: [application/json]
+    parameters:
+      - in: body
+        name: body
+        required: true
+        schema:
+          type: object
+          required: [device_id]
+          properties:
+            device_id:
+              type: integer
+              example: 1
+    responses:
+      200:
+        description: SYN-ACK
+        schema:
+          type: object
+          properties:
+            handshake: {type: string, example: SYN-ACK}
+            device_id: {type: integer, example: 1}
+      400:
+        description: missing device_id
+    """
     try:
         data = request.get_json()
         device_id = data.get("device_id")
-
         if not device_id:
             return jsonify({"error": "missing device_id"}), 400
 
@@ -315,19 +559,38 @@ def device_connect_syn():
             db.session.add(device)
         else:
             device.status = False
-
         db.session.commit()
-
         return jsonify({"handshake": "SYN-ACK", "device_id": device_id}), 200
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
 @app.route("/api/connect/ack", methods=["POST"])
 def device_connect_ack():
+    """
+    RPi connect step 2 (ACK). Marks device online.
+    ---
+    tags: [Devices]
+    consumes: [application/json]
+    parameters:
+      - in: body
+        name: body
+        required: true
+        schema:
+          type: object
+          required: [device_id]
+          properties:
+            device_id:
+              type: integer
+              example: 1
+    responses:
+      200:
+        description: ACK complete
+      404:
+        description: device not found
+    """
     try:
         data = request.get_json()
         device_id = data.get("device_id")
-
         if not device_id:
             return jsonify({"error": "missing device_id"}), 400
 
@@ -337,23 +600,137 @@ def device_connect_ack():
 
         device.status = True
         db.session.commit()
-
         return jsonify({"status": "online", "device_id": device_id, "handshake": "ACK-complete"}), 200
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
 # =========================
-# PATTERN CHECK
+# HEARTBEAT / TRIGGER
+# =========================
+@app.route("/api/heartbeat", methods=["POST"])
+def heartbeat():
+    """
+    RPi heartbeat. Returns next pending command (and marks it executed).
+    ---
+    tags: [Commands]
+    consumes: [application/json]
+    parameters:
+      - in: body
+        name: body
+        required: true
+        schema:
+          type: object
+          required: [device_id]
+          properties:
+            device_id:
+              type: integer
+              example: 1
+    responses:
+      200:
+        description: OK or command
+        schema:
+          type: object
+          properties:
+            status: {type: string, example: ok}
+            command: {type: string, example: GET_DTCS_PERM}
+      400:
+        description: missing device_id
+    """
+    try:
+        data = request.get_json()
+        device_id = data.get("device_id")
+        if not device_id:
+            return jsonify({"error": "missing device_id"}), 400
+
+        device = Device.query.get(device_id)
+        if not device:
+            device = Device(id=device_id, status=True)
+            db.session.add(device)
+        else:
+            device.status = True
+        db.session.commit()
+
+        cmd = PendingCommand.query.filter_by(device_id=device_id, executed=False).first()
+        if cmd:
+            cmd.executed = True
+            db.session.commit()
+            return jsonify({"command": cmd.command}), 200
+
+        return jsonify({"status": "ok"}), 200
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+@app.route("/api/trigger", methods=["POST"])
+def trigger_command():
+    """
+    Queue a command for device (no JWT here).
+    ---
+    tags: [Commands]
+    consumes: [application/json]
+    parameters:
+      - in: body
+        name: body
+        required: true
+        schema:
+          type: object
+          required: [device_id, command]
+          properties:
+            device_id: {type: integer, example: 1}
+            command:
+              type: string
+              example: GET_VIN
+              enum: [GET_VIN, GET_DTCS_PERM, GET_DTCS_PEND, GET_RPM, GET_TEMP, CLEAR_DTCS]
+    responses:
+      200:
+        description: Queued
+    """
+    try:
+        data = request.get_json()
+        device_id = data.get("device_id")
+        command = data.get("command")
+
+        valid_commands = [
+            "GET_VIN", "GET_DTCS_PERM", "GET_DTCS_PEND",
+            "GET_RPM", "GET_TEMP", "CLEAR_DTCS",
+        ]
+        if command not in valid_commands:
+            return jsonify({"error": "invalid command"}), 400
+
+        cmd = PendingCommand(device_id=device_id, command=command)
+        db.session.add(cmd)
+        db.session.commit()
+        return jsonify({"status": "queued", "command": command}), 200
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+# =========================
+# DTC / PATTERNS
 # =========================
 @app.route("/api/dtc/pattern-check/<vin>", methods=["GET"])
 @jwt_required(optional=True)
 def check_dtc_patterns(vin):
+    """
+    Check DTC patterns for VIN (JWT optional).
+    ---
+    tags: [DTC]
+    security: []
+    parameters:
+      - in: path
+        name: vin
+        required: true
+        type: string
+        example: WVWZZZ1KZ6W000001
+    responses:
+      200:
+        description: Matched patterns
+      404:
+        description: Vehicle not found
+    """
     vehicle = Vehicle.query.filter_by(vin=vin.upper()).first()
     if not vehicle:
         return jsonify({"error": "Vehicle not found"}), 404
 
     active_dtcs = set(d.dtc_code.upper() for d in DTCCodeActive.query.filter_by(vin_id=vehicle.id))
-
     if not active_dtcs:
         return jsonify({
             "vin": vin,
@@ -364,7 +741,6 @@ def check_dtc_patterns(vin):
 
     matched_patterns = []
     patterns = DtcPattern.query.all()
-
     for pattern in patterns:
         pattern_codes = set(
             l.dtc_code.upper()
@@ -377,88 +753,35 @@ def check_dtc_patterns(vin):
                 "primary_cause": pattern.primary_cause,
                 "confidence": pattern.confidence,
                 "required_codes": list(pattern_codes),
-                "vehicle_codes": list(active_dtcs)
+                "vehicle_codes": list(active_dtcs),
             })
 
-    return jsonify({
-        "vin": vin,
-        "active_dtc_codes": list(active_dtcs),
-        "matched_patterns": matched_patterns
-    }), 200
+    return jsonify({"vin": vin, "active_dtc_codes": list(active_dtcs), "matched_patterns": matched_patterns}), 200
 
-# =========================
-# CLEAR / READ DTC (pending commands)
-# =========================
-@app.route("/api/device/<int:device_id>/clear-dtcs", methods=["POST"])
-@jwt_required()
-def clear_device_dtcs(device_id):
-    try:
-        user_id = int(get_jwt_identity())
-        user = User.query.get(user_id)
-        if not user:
-            return jsonify({"error": "User not found"}), 404
-
-        if user.role == "admin":
-            device = Device.query.get(device_id)
-        else:
-            device = Device.query.filter_by(id=device_id, user_id=user_id).first()
-
-        if not device:
-            return jsonify({"error": "Device not found or not owned by user"}), 404
-
-        cmd = PendingCommand(device_id=device_id, command="CLEAR_DTCS")
-        db.session.add(cmd)
-        db.session.commit()
-
-        return jsonify({
-            "status": "waiting",
-            "message": "Clear command sent to device. Waiting for RPi confirmation."
-        }), 200
-
-    except Exception as e:
-        db.session.rollback()
-        print("❌ CLEAR DEVICE DTCS ERROR:", e)
-        return jsonify({"error": str(e)}), 500
-
-@app.route("/api/device/<int:device_id>/read-dtcs", methods=["POST"])
-@jwt_required()
-def read_device_dtcs(device_id):
-    try:
-        user_id = int(get_jwt_identity())
-        user = User.query.get(user_id)
-        if not user:
-            return jsonify({"error": "User not found"}), 404
-
-        if user.role == "admin":
-            device = Device.query.get(device_id)
-        else:
-            device = Device.query.filter_by(id=device_id, user_id=user_id).first()
-
-        if not device:
-            return jsonify({"error": "Device not found or not owned by user"}), 404
-
-        cmd = PendingCommand(device_id=device_id, command="GET_DTCS_PERM")
-        db.session.add(cmd)
-        db.session.commit()
-
-        return jsonify({
-            "status": "success",
-            "message": "Read DTC command sent to device",
-            "device_id": device_id,
-            "command": "GET_DTCS_PERM"
-        }), 200
-
-    except Exception as e:
-        db.session.rollback()
-        print("❌ READ DEVICE DTCS ERROR:", e)
-        return jsonify({"error": str(e)}), 500
-
-# =========================
-# DTC HISTORY FULL
-# =========================
 @app.route("/api/dtc-history-full", methods=["POST"])
 @jwt_required(optional=True)
 def dtc_history_full():
+    """
+    Full DTC history with descriptions (JWT optional).
+    ---
+    tags: [DTC]
+    security: []
+    consumes: [application/json]
+    parameters:
+      - in: body
+        name: body
+        required: true
+        schema:
+          type: object
+          required: [vin]
+          properties:
+            vin: {type: string, example: WVWZZZ1KZ6W000001}
+    responses:
+      200:
+        description: History list
+      404:
+        description: Vehicle not found
+    """
     try:
         data = request.get_json()
         vin = data.get("vin")
@@ -488,107 +811,81 @@ def dtc_history_full():
         } for h in history]
 
         return jsonify({"status": "success", "vin": vin.upper(), "history": results}), 200
-
-    except Exception as e:
-        print("❌ DTC HISTORY FULL ERROR:", e)
-        return jsonify({"error": str(e)}), 500
-
-# =========================
-# VIN decode NHTSA
-# =========================
-@app.route("/api/vin/nhtsa", methods=["POST"])
-def decode_vin_nhtsa():
-    try:
-        payload = request.get_json()
-        vin = payload.get("vin")
-        if not vin:
-            return jsonify({"error": "Missing VIN"}), 400
-
-        url = f"https://vpic.nhtsa.dot.gov/api/vehicles/decodevinvaluesextended/{vin}?format=json"
-        response = requests.get(url)
-        data = response.json()
-
-        if "Results" not in data:
-            return jsonify({"error": "Unexpected API response"}), 500
-
-        vehicle_info = data["Results"][0]
-        return jsonify({
-            "vin": vin,
-            "make": vehicle_info.get("Make"),
-            "brand": vehicle_info.get("Brand"),
-            "model": vehicle_info.get("Model"),
-            "year": vehicle_info.get("ModelYear"),
-            "engine": vehicle_info.get("EngineModel"),
-            "bodyClass": vehicle_info.get("BodyClass"),
-            "manufacturer": vehicle_info.get("ManufacturerName"),
-        }), 200
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
 # =========================
-# ADD DEVICE
+# DEVICES (JWT)
 # =========================
-@app.route("/api/add-device", methods=["POST"])
+@app.route("/api/my-devices", methods=["GET"])
 @jwt_required()
-def add_device():
-    try:
-        payload = request.get_json()
-        device_id_raw = payload.get("device_id")
-        target_user_id = payload.get("user_id")
-        current_user_id = int(get_jwt_identity())
-        current_user = User.query.get(current_user_id)
-
-        if not current_user:
-            return jsonify({"error": "User not found"}), 404
-
-        if current_user.role != "admin":
-            target_user_id = current_user.id
-
-        if not target_user_id:
-            return jsonify({"error": "Missing user_id (admin only)"}), 400
-
-        try:
-            device_id = int(device_id_raw)
-        except (ValueError, TypeError):
-            return jsonify({"error": "Device ID must be an integer"}), 400
-
-        existing = Device.query.get(device_id)
-        if existing:
-            return jsonify({"error": f"Device ID {device_id} already exists"}), 409
-
-        new_device = Device(id=device_id, user_id=int(target_user_id), status=False)
-        db.session.add(new_device)
-        db.session.commit()
-
-        return jsonify({
-            "status": "success",
-            "device_id": device_id,
-            "assigned_to": int(target_user_id),
-            "message": f"Device {device_id} assigned to user {target_user_id}"
-        }), 201
-
-    except Exception as e:
-        db.session.rollback()
-        print("❌ ADD DEVICE ERROR:", e)
-        return jsonify({"error": str(e)}), 500
-
-# =========================
-# DEVICE DIAGNOSTICS
-# =========================
-@app.route("/api/device/<int:device_id>/diagnostics", methods=["GET"])
-@jwt_required()
-def device_diagnostics(device_id):
+def my_devices():
+    """
+    List devices for current user (admin sees all).
+    ---
+    tags: [Devices]
+    security:
+      - BearerAuth: []
+    responses:
+      200:
+        description: List of devices
+      401:
+        description: Missing/invalid token
+    """
     try:
         user_id = int(get_jwt_identity())
         user = User.query.get(user_id)
         if not user:
             return jsonify({"error": "User not found"}), 404
 
-        if user.role == "admin":
-            device = Device.query.get(device_id)
-        else:
-            device = Device.query.filter_by(id=device_id, user_id=user_id).first()
+        devices = Device.query.all() if user.role == "admin" else Device.query.filter_by(user_id=user_id).all()
 
+        result = []
+        for d in devices:
+            vin = None
+            if d.link and len(d.link) > 0 and d.link[0].last_vin_id:
+                vin_obj = Vehicle.query.get(d.link[0].last_vin_id)
+                vin = vin_obj.vin if vin_obj else None
+
+            result.append({
+                "device_id": d.id,
+                "vin": vin,
+                "status": "Online" if d.status else "Offline",
+                "user_id": d.user_id
+            })
+
+        return jsonify({"status": "success", "devices": result}), 200
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+@app.route("/api/device/<int:device_id>/diagnostics", methods=["GET"])
+@jwt_required()
+def device_diagnostics(device_id):
+    """
+    Get diagnostics for device: VIN + active DTC codes + device online status.
+    ---
+    tags: [Devices]
+    security:
+      - BearerAuth: []
+    parameters:
+      - in: path
+        name: device_id
+        required: true
+        type: integer
+        example: 1
+    responses:
+      200:
+        description: Diagnostics
+      404:
+        description: Device not found or not owned
+    """
+    try:
+        user_id = int(get_jwt_identity())
+        user = User.query.get(user_id)
+        if not user:
+            return jsonify({"error": "User not found"}), 404
+
+        device = Device.query.get(device_id) if user.role == "admin" else Device.query.filter_by(id=device_id, user_id=user_id).first()
         if not device:
             return jsonify({"error": "Device not found or not owned by user"}), 404
 
@@ -635,233 +932,157 @@ def device_diagnostics(device_id):
             "dtc_codes": dtcs or [],
             "online": device.status
         }), 200
-
     except Exception as e:
-        print("❌ DEVICE DIAGNOSTICS ERROR:", e)
         return jsonify({"error": str(e)}), 500
 
-# =========================
-# MY DEVICES
-# =========================
-@app.route("/api/my-devices", methods=["GET"])
+@app.route("/api/device/<int:device_id>/read-dtcs", methods=["POST"])
 @jwt_required()
-def my_devices():
+def read_device_dtcs(device_id):
+    """
+    Queue GET_DTCS_PERM command for device.
+    ---
+    tags: [Commands]
+    security:
+      - BearerAuth: []
+    parameters:
+      - in: path
+        name: device_id
+        required: true
+        type: integer
+        example: 1
+    responses:
+      200:
+        description: Queued read command
+      404:
+        description: Device not found / not owned
+    """
     try:
         user_id = int(get_jwt_identity())
         user = User.query.get(user_id)
         if not user:
             return jsonify({"error": "User not found"}), 404
 
-        if user.role == "admin":
-            devices = Device.query.all()
-        else:
-            devices = Device.query.filter_by(user_id=user_id).all()
-
-        result = []
-        for d in devices:
-            vin = None
-            if d.link and len(d.link) > 0 and d.link[0].last_vin_id:
-                vin_obj = Vehicle.query.get(d.link[0].last_vin_id)
-                vin = vin_obj.vin if vin_obj else None
-
-            result.append({
-                "device_id": d.id,
-                "vin": vin,
-                "status": "Online" if d.status else "Offline",
-                "user_id": d.user_id
-            })
-
-        return jsonify({"status": "success", "devices": result}), 200
-
-    except Exception as e:
-        print("❌ MY DEVICES ERROR:", e)
-        return jsonify({"error": str(e)}), 500
-
-# =========================
-# LOGIN / REGISTER
-# =========================
-@app.route("/api/login", methods=["POST"])
-def login():
-    try:
-        data = request.get_json()
-        email = data.get("email")
-        password = data.get("password")
-
-        if not email or not password:
-            return jsonify({"error": "Missing email or password"}), 400
-
-        user = User.query.filter_by(email=email).first()
-        if not user or user.password != password:
-            return jsonify({"error": "Invalid credentials"}), 401
-
-        access_token = create_access_token(identity=str(user.id))
-        return jsonify({
-            "status": "success",
-            "access_token": access_token,
-            "role": user.role
-        }), 200
-
-    except Exception as e:
-        return jsonify({"error": str(e)}), 500
-
-@app.route("/api/register", methods=["POST"])
-def register():
-    try:
-        data = request.get_json()
-        email = data.get("email")
-        password = data.get("password")
-
-        if not email or not password:
-            return jsonify({"error": "Missing email or password"}), 400
-
-        if User.query.filter_by(email=email).first():
-            return jsonify({"error": "Email already exists"}), 409
-
-        new_user = User(email=email, password=password, role="user")
-        db.session.add(new_user)
-        db.session.commit()
-
-        return jsonify({"status": "success", "message": "User registered"}), 201
-    except Exception as e:
-        db.session.rollback()
-        return jsonify({"error": str(e)}), 500
-
-# =========================
-# LOAD DTC CSV
-# =========================
-@app.route("/api/load-dtc-codes", methods=["POST"])
-def load_dtc_codes_from_csv():
-    try:
-        payload = request.get_json()
-        csv_url = payload.get("csv_url")
-
-        if not csv_url:
-            return jsonify({"error": "Missing 'csv_url' parameter"}), 400
-
-        response = requests.get(csv_url)
-        if response.status_code != 200:
-            return jsonify({"error": f"Failed to fetch CSV: {response.status_code}"}), 400
-
-        csv_text = response.text
-        csv_reader = csv.reader(StringIO(csv_text))
-
-        inserted, skipped = 0, 0
-
-        for row in csv_reader:
-            if len(row) < 2:
-                continue
-
-            dtc_code = row[0].strip()
-            dtc_description = row[1].strip()
-
-            if DtcCodeMeaning.query.filter_by(dtc_code=dtc_code).first():
-                skipped += 1
-                continue
-
-            db.session.add(DtcCodeMeaning(dtc_code=dtc_code, dtc_description=dtc_description))
-            inserted += 1
-
-        db.session.commit()
-
-        return jsonify({"status": "success", "inserted": inserted, "skipped_existing": skipped}), 200
-
-    except Exception as e:
-        db.session.rollback()
-        return jsonify({"error": str(e)}), 500
-
-@app.route("/api/dtc-description", methods=["POST"])
-def get_dtc_description():
-    try:
-        payload = request.get_json()
-        dtc_code = payload.get("dtc_code")
-
-        if not dtc_code:
-            return jsonify({"error": "Missing 'dtc_code' parameter"}), 400
-
-        record = DtcCodeMeaning.query.filter(
-            db.func.lower(DtcCodeMeaning.dtc_code) == dtc_code.lower()
-        ).first()
-
-        if not record:
-            return jsonify({
-                "status": "not_found",
-                "message": f"DTC code '{dtc_code}' not found in database."
-            }), 404
-
-        return jsonify({
-            "status": "success",
-            "dtc_code": record.dtc_code,
-            "description": record.dtc_description
-        }), 200
-
-    except Exception as e:
-        return jsonify({"error": str(e)}), 500
-
-# =========================
-# HEARTBEAT / TRIGGER
-# =========================
-@app.route("/api/heartbeat", methods=["POST"])
-def heartbeat():
-    try:
-        data = request.get_json()
-        device_id = data.get("device_id")
-        if not device_id:
-            return jsonify({"error": "missing device_id"}), 400
-
-        device = Device.query.get(device_id)
+        device = Device.query.get(device_id) if user.role == "admin" else Device.query.filter_by(id=device_id, user_id=user_id).first()
         if not device:
-            device = Device(id=device_id, status=True)
-            db.session.add(device)
-        else:
-            device.status = True
-        db.session.commit()
+            return jsonify({"error": "Device not found or not owned by user"}), 404
 
-        cmd = PendingCommand.query.filter_by(device_id=device_id, executed=False).first()
-        if cmd:
-            cmd.executed = True
-            db.session.commit()
-            return jsonify({"command": cmd.command}), 200
-
-        return jsonify({"status": "ok"}), 200
-    except Exception as e:
-        return jsonify({"error": str(e)}), 500
-
-@app.route("/api/trigger", methods=["POST"])
-def trigger_command():
-    try:
-        data = request.get_json()
-        device_id = data.get("device_id")
-        command = data.get("command")
-
-        valid_commands = [
-            "GET_VIN",
-            "GET_DTCS_PERM",
-            "GET_DTCS_PEND",
-            "GET_RPM",
-            "GET_TEMP",
-            "CLEAR_DTCS",
-        ]
-
-        if command not in valid_commands:
-            return jsonify({"error": "invalid command"}), 400
-
-        cmd = PendingCommand(device_id=device_id, command=command)
+        cmd = PendingCommand(device_id=device_id, command="GET_DTCS_PERM")
         db.session.add(cmd)
         db.session.commit()
 
-        return jsonify({"status": "queued", "command": command}), 200
-
+        return jsonify({
+            "status": "success",
+            "message": "Read DTC command sent to device",
+            "device_id": device_id,
+            "command": "GET_DTCS_PERM"
+        }), 200
     except Exception as e:
+        db.session.rollback()
+        return jsonify({"error": str(e)}), 500
+
+@app.route("/api/device/<int:device_id>/clear-dtcs", methods=["POST"])
+@jwt_required()
+def clear_device_dtcs(device_id):
+    """
+    Queue CLEAR_DTCS command for device.
+    ---
+    tags: [Commands]
+    security:
+      - BearerAuth: []
+    parameters:
+      - in: path
+        name: device_id
+        required: true
+        type: integer
+        example: 1
+    responses:
+      200:
+        description: Queued clear command
+      404:
+        description: Device not found / not owned
+    """
+    try:
+        user_id = int(get_jwt_identity())
+        user = User.query.get(user_id)
+        if not user:
+            return jsonify({"error": "User not found"}), 404
+
+        device = Device.query.get(device_id) if user.role == "admin" else Device.query.filter_by(id=device_id, user_id=user_id).first()
+        if not device:
+            return jsonify({"error": "Device not found or not owned by user"}), 404
+
+        cmd = PendingCommand(device_id=device_id, command="CLEAR_DTCS")
+        db.session.add(cmd)
+        db.session.commit()
+
+        return jsonify({
+            "status": "waiting",
+            "message": "Clear command sent to device. Waiting for RPi confirmation."
+        }), 200
+    except Exception as e:
+        db.session.rollback()
         return jsonify({"error": str(e)}), 500
 
 # =========================
-# CAN endpoint (VIN/DTC/CLEAR) + ✅ NEW: TELEMETRY via REST also pushes WS
+# CAN ingest (RPi)
 # =========================
 @app.route("/api/can", methods=["POST"])
 def receive_can_packet():
     """
-    RPi pošle VIN, DTC alebo clear_status po CLEAR_DTCS akcii.
-    + ✅ NOVÉ: ak pošle telemetry, uloží sa + pushne cez WS.
+    RPi ingest endpoint: supports VIN, DTC, clear_status, telemetry snapshot.
+    Telemetry snapshot is stored to DB and pushed via Socket.IO.
+    ---
+    tags: [CAN]
+    consumes: [application/json]
+    parameters:
+      - in: body
+        name: body
+        required: true
+        schema:
+          type: object
+          required: [device_id]
+          properties:
+            device_id: {type: integer, example: 1}
+            vin: {type: string, example: WVWZZZ1KZ6W000001}
+            dtc_code: {type: string, example: P0300}
+            clear_status: {type: string, example: ok}
+            year: {type: string, example: "2006"}
+            brand: {type: string, example: VW}
+            model: {type: string, example: Golf}
+            engine: {type: string, example: 1.9 TDI}
+            odometer: {type: integer, example: 251000}
+            speed: {type: integer, example: 0}
+            battery:
+              type: object
+              properties:
+                battery_voltage: {type: number, example: 12.44}
+                health: {type: string, example: good}
+            engine_data:
+              type: object
+              description: "Use `engine` field (object) in real payload; this is documentation only."
+            engine:
+              type: object
+              properties:
+                running: {type: boolean, example: false}
+                rpm: {type: integer, example: 0}
+                load: {type: number, example: 10.0}
+                coolant_temp: {type: integer, example: 88}
+                oil_temp: {type: integer, example: 70}
+                intake_air_temp: {type: integer, example: 25}
+            fuel:
+              type: object
+              properties:
+                consumption_lh: {type: number, example: 0.0}
+                consumption_l100km: {type: number, example: 0.0}
+                maf: {type: number, example: 2.1}
+                type: {type: string, example: diesel}
+    responses:
+      201:
+        description: Stored VIN/DTC/Telemetry
+      200:
+        description: Ignored or Clear result
+      404:
+        description: Device not found
     """
     try:
         payload = request.get_json()
@@ -870,7 +1091,6 @@ def receive_can_packet():
         dtc_code = payload.get("dtc_code")
         clear_status = payload.get("clear_status")
 
-        # extra vehicle info
         year = payload.get("year")
         model = payload.get("model")
         brand = payload.get("brand")
@@ -883,9 +1103,7 @@ def receive_can_packet():
         if not device:
             return jsonify({"error": f"Device {device_id} not found"}), 404
 
-        # ✅ NEW: TELEMETRY via REST
-        # RPi môže poslať telemetry v tom istom /api/can payload-e:
-        # odometer, battery{..}, engine{..}, fuel{..}, speed
+        # TELEMETRY snapshot
         if any(k in payload for k in ["odometer", "battery", "engine", "fuel", "speed"]):
             t = _telemetry_payload(int(device_id), payload)
             device.status = True
@@ -896,7 +1114,7 @@ def receive_can_packet():
 
             return jsonify({"status": "telemetry stored", "device_id": int(device_id), "timestamp": t["timestamp"]}), 201
 
-        # 1) CLEAR_DTCS confirmation
+        # CLEAR confirmation
         if clear_status is not None:
             state = DeviceVehicle.query.filter_by(device_id=device_id).first()
             if not state or not state.last_vin_id:
@@ -909,7 +1127,7 @@ def receive_can_packet():
 
             return jsonify({"status": "Clear failed"}), 200
 
-        # 2) VIN
+        # VIN
         if vin:
             vin = vin.strip().upper()
             if len(vin) != 17:
@@ -955,7 +1173,6 @@ def receive_can_packet():
                 state.last_vin_id = vehicle.id
 
             db.session.commit()
-
             return jsonify({
                 "status": "VIN stored",
                 "vin": vin,
@@ -965,7 +1182,7 @@ def receive_can_packet():
                 "engine": vehicle.engine
             }), 201
 
-        # 3) DTC
+        # DTC
         if dtc_code:
             dtc_code = dtc_code.strip().upper()
 
@@ -985,10 +1202,8 @@ def receive_can_packet():
             severity = detect_severity_from_description(description)
 
             db.session.add(DTCCodeHistory(vin_id=vehicle.id, dtc_code=dtc_code, severity=severity))
-
             DTCCodeActive.query.filter_by(vin_id=vehicle.id, dtc_code=dtc_code).delete()
             db.session.add(DTCCodeActive(vin_id=vehicle.id, dtc_code=dtc_code, severity=severity))
-
             db.session.commit()
 
             return jsonify({"status": "DTC stored", "vin": vehicle.vin, "dtc": dtc_code, "severity": severity}), 201
@@ -1000,11 +1215,177 @@ def receive_can_packet():
         return jsonify({"error": str(e)}), 500
 
 # =========================
-# DTC HISTORY (simple)
+# VIN decode NHTSA
+# =========================
+@app.route("/api/vin/nhtsa", methods=["POST"])
+def decode_vin_nhtsa():
+    """
+    Decode VIN using NHTSA VPIC (no API key).
+    ---
+    tags: [VIN]
+    consumes: [application/json]
+    parameters:
+      - in: body
+        name: body
+        required: true
+        schema:
+          type: object
+          required: [vin]
+          properties:
+            vin: {type: string, example: WVWZZZ1KZ6W000001}
+    responses:
+      200:
+        description: VIN decoded
+      400:
+        description: Missing VIN
+    """
+    try:
+        payload = request.get_json()
+        vin = payload.get("vin")
+        if not vin:
+            return jsonify({"error": "Missing VIN"}), 400
+
+        url = f"https://vpic.nhtsa.dot.gov/api/vehicles/decodevinvaluesextended/{vin}?format=json"
+        response = requests.get(url)
+        data = response.json()
+
+        if "Results" not in data:
+            return jsonify({"error": "Unexpected API response"}), 500
+
+        vehicle_info = data["Results"][0]
+        return jsonify({
+            "vin": vin,
+            "make": vehicle_info.get("Make"),
+            "brand": vehicle_info.get("Brand"),
+            "model": vehicle_info.get("Model"),
+            "year": vehicle_info.get("ModelYear"),
+            "engine": vehicle_info.get("EngineModel"),
+            "bodyClass": vehicle_info.get("BodyClass"),
+            "manufacturer": vehicle_info.get("ManufacturerName"),
+        }), 200
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+# =========================
+# LOAD DTC CSV + DTC DESC
+# =========================
+@app.route("/api/load-dtc-codes", methods=["POST"])
+def load_dtc_codes_from_csv():
+    """
+    Load DTC meanings from CSV URL (2 columns: code, description).
+    ---
+    tags: [DTC]
+    consumes: [application/json]
+    parameters:
+      - in: body
+        name: body
+        required: true
+        schema:
+          type: object
+          required: [csv_url]
+          properties:
+            csv_url: {type: string, example: "https://raw.githubusercontent.com/.../dtc.csv"}
+    responses:
+      200:
+        description: Imported
+    """
+    try:
+        payload = request.get_json()
+        csv_url = payload.get("csv_url")
+        if not csv_url:
+            return jsonify({"error": "Missing 'csv_url' parameter"}), 400
+
+        response = requests.get(csv_url)
+        if response.status_code != 200:
+            return jsonify({"error": f"Failed to fetch CSV: {response.status_code}"}), 400
+
+        csv_text = response.text
+        csv_reader = csv.reader(StringIO(csv_text))
+
+        inserted, skipped = 0, 0
+        for row in csv_reader:
+            if len(row) < 2:
+                continue
+            dtc_code = row[0].strip()
+            dtc_description = row[1].strip()
+
+            if DtcCodeMeaning.query.filter_by(dtc_code=dtc_code).first():
+                skipped += 1
+                continue
+
+            db.session.add(DtcCodeMeaning(dtc_code=dtc_code, dtc_description=dtc_description))
+            inserted += 1
+
+        db.session.commit()
+        return jsonify({"status": "success", "inserted": inserted, "skipped_existing": skipped}), 200
+
+    except Exception as e:
+        db.session.rollback()
+        return jsonify({"error": str(e)}), 500
+
+@app.route("/api/dtc-description", methods=["POST"])
+def get_dtc_description():
+    """
+    Get DTC description by code.
+    ---
+    tags: [DTC]
+    consumes: [application/json]
+    parameters:
+      - in: body
+        name: body
+        required: true
+       schema:
+          type: object
+          required: [dtc_code]
+          properties:
+            dtc_code: {type: string, example: P0300}
+    responses:
+      200:
+        description: Found
+      404:
+        description: Not found
+    """
+    try:
+        payload = request.get_json()
+        dtc_code = payload.get("dtc_code")
+        if not dtc_code:
+            return jsonify({"error": "Missing 'dtc_code' parameter"}), 400
+
+        record = DtcCodeMeaning.query.filter(
+            db.func.lower(DtcCodeMeaning.dtc_code) == dtc_code.lower()
+        ).first()
+
+        if not record:
+            return jsonify({"status": "not_found", "message": f"DTC code '{dtc_code}' not found in database."}), 404
+
+        return jsonify({"status": "success", "dtc_code": record.dtc_code, "description": record.dtc_description}), 200
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+# =========================
+# DTC HISTORY (simple, JWT)
 # =========================
 @app.route("/api/dtc-history/<vin>", methods=["GET"])
 @jwt_required()
 def get_dtc_history(vin):
+    """
+    Get DTC history list for VIN (JWT required).
+    ---
+    tags: [DTC]
+    security:
+      - BearerAuth: []
+    parameters:
+      - in: path
+        name: vin
+        required: true
+        type: string
+        example: WVWZZZ1KZ6W000001
+    responses:
+      200:
+        description: History list
+      404:
+        description: Vehicle not found
+    """
     vehicle = Vehicle.query.filter_by(vin=vin.upper()).first()
     if not vehicle:
         return jsonify({"error": "Vehicle not found"}), 404
@@ -1020,6 +1401,22 @@ def get_dtc_history(vin):
 # =========================
 @app.route("/api/device_offline/<int:device_id>", methods=["POST"])
 def device_offline(device_id):
+    """
+    Mark device offline (no JWT).
+    ---
+    tags: [Devices]
+    parameters:
+      - in: path
+        name: device_id
+        required: true
+        type: integer
+        example: 1
+    responses:
+      200:
+        description: Updated
+      404:
+        description: Device not found
+    """
     try:
         device = Device.query.get(device_id)
         if not device:
@@ -1028,7 +1425,6 @@ def device_offline(device_id):
         device.status = False
         db.session.commit()
         return jsonify({"status": "success", "device_id": device_id, "message": "Device set to offline"}), 200
-
     except Exception as e:
         db.session.rollback()
         return jsonify({"error": str(e)}), 500
@@ -1038,6 +1434,26 @@ def device_offline(device_id):
 # =========================
 @app.route("/api/vindecode", methods=["POST"])
 def decode_vin_apiverve():
+    """
+    Decode VIN via apiverve (requires VINDECODER_API_KEY env).
+    ---
+    tags: [VIN]
+    consumes: [application/json]
+    parameters:
+      - in: body
+        name: body
+        required: true
+        schema:
+          type: object
+          required: [vin]
+          properties:
+            vin: {type: string, example: WVWZZZ1KZ6W000001}
+    responses:
+      200:
+        description: Decoded
+      500:
+        description: Missing API key
+    """
     try:
         payload = request.get_json()
         vin = payload.get("vin")
@@ -1051,15 +1467,10 @@ def decode_vin_apiverve():
 
         url = f"https://api.apiverve.com/v1/vindecoder?vin={vin}"
         headers = {"X-API-Key": api_key}
-
         response = requests.get(url, headers=headers, timeout=10)
 
         if response.status_code != 200:
-            return jsonify({
-                "error": "VIN decoder API error",
-                "status": response.status_code,
-                "details": response.text
-            }), response.status_code
+            return jsonify({"error": "VIN decoder API error", "status": response.status_code, "details": response.text}), response.status_code
 
         data = response.json()
         if "data" in data:
@@ -1076,16 +1487,15 @@ def decode_vin_apiverve():
             "transmission": data.get("transmission"),
             "driveType": data.get("driveType"),
             "fuelType": data.get("fuelType"),
-            "bodyStyle": data.get("bodyStyle")
+            "bodyStyle": data.get("bodyStyle"),
         }
 
         return jsonify({"status": "success", "source": "apiverve", "data": cleaned}), 200
-
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
 # =========================
-# GET "last known telemetry" endpoints (ponechane)
+# TELEMETRY SNAPSHOT (JWT)
 # =========================
 def _get_latest_telemetry(device_id: int) -> DeviceTelemetry | None:
     return (
@@ -1098,6 +1508,24 @@ def _get_latest_telemetry(device_id: int) -> DeviceTelemetry | None:
 @app.route("/api/device/<int:device_id>/odometer", methods=["GET"])
 @jwt_required()
 def get_device_odometer(device_id):
+    """
+    Get last known odometer from telemetry (JWT).
+    ---
+    tags: [Telemetry]
+    security:
+      - BearerAuth: []
+    parameters:
+      - in: path
+        name: device_id
+        required: true
+        type: integer
+        example: 1
+    responses:
+      200:
+        description: Odometer
+      404:
+        description: No odometer data
+    """
     t = _get_latest_telemetry(device_id)
     if not t or t.odometer is None:
         return jsonify({"error": "No odometer data"}), 404
@@ -1106,6 +1534,24 @@ def get_device_odometer(device_id):
 @app.route("/api/device/<int:device_id>/battery", methods=["GET"])
 @jwt_required()
 def get_device_battery(device_id):
+    """
+    Get last known battery from telemetry (JWT).
+    ---
+    tags: [Telemetry]
+    security:
+      - BearerAuth: []
+    parameters:
+      - in: path
+        name: device_id
+        required: true
+        type: integer
+        example: 1
+    responses:
+      200:
+        description: Battery
+      404:
+        description: No battery data
+    """
     t = _get_latest_telemetry(device_id)
     if not t or t.battery_voltage is None:
         return jsonify({"error": "No battery data"}), 404
@@ -1120,6 +1566,24 @@ def get_device_battery(device_id):
 @app.route("/api/device/<int:device_id>/engine", methods=["GET"])
 @jwt_required()
 def get_device_engine(device_id):
+    """
+    Get last known engine data from telemetry (JWT).
+    ---
+    tags: [Telemetry]
+    security:
+      - BearerAuth: []
+    parameters:
+      - in: path
+        name: device_id
+        required: true
+        type: integer
+        example: 1
+    responses:
+      200:
+        description: Engine data
+      404:
+        description: No engine data
+    """
     t = _get_latest_telemetry(device_id)
     if not t or all(v is None for v in [t.engine_running, t.engine_rpm, t.engine_load, t.coolant_temp, t.oil_temp, t.intake_air_temp]):
         return jsonify({"error": "No engine data"}), 404
@@ -1140,6 +1604,24 @@ def get_device_engine(device_id):
 @app.route("/api/device/<int:device_id>/fuel", methods=["GET"])
 @jwt_required()
 def get_device_fuel(device_id):
+    """
+    Get last known fuel data from telemetry (JWT).
+    ---
+    tags: [Telemetry]
+    security:
+      - BearerAuth: []
+    parameters:
+      - in: path
+        name: device_id
+        required: true
+        type: integer
+        example: 1
+    responses:
+      200:
+        description: Fuel data
+      404:
+        description: No fuel data
+    """
     t = _get_latest_telemetry(device_id)
     if not t or all(v is None for v in [t.consumption_lh, t.consumption_l100km, t.maf, t.fuel_type]):
         return jsonify({"error": "No fuel data"}), 404
@@ -1158,16 +1640,42 @@ def get_device_fuel(device_id):
 @app.route("/api/device/<int:device_id>/speed", methods=["GET"])
 @jwt_required()
 def get_device_speed(device_id):
+    """
+    Get last known speed from telemetry (JWT).
+    ---
+    tags: [Telemetry]
+    security:
+      - BearerAuth: []
+    parameters:
+      - in: path
+        name: device_id
+        required: true
+        type: integer
+        example: 1
+    responses:
+      200:
+        description: Speed
+      404:
+        description: No speed data
+    """
     t = _get_latest_telemetry(device_id)
     if not t or t.speed is None:
         return jsonify({"error": "No speed data"}), 404
     return jsonify({"status": "success", "device_id": device_id, "speed": int(t.speed), "timestamp": _iso(t.created_at)}), 200
 
 # =========================
-# SHOW ALL
+# SHOW ALL (debug)
 # =========================
 @app.route("/api/all", methods=["GET"])
 def show_all():
+    """
+    Debug endpoint: list all vehicles with active/history DTCs (no JWT).
+    ---
+    tags: [Admin]
+    responses:
+      200:
+        description: List
+    """
     try:
         vehicles = Vehicle.query.all()
         data = []
@@ -1179,7 +1687,6 @@ def show_all():
             })
         return jsonify(data), 200
     except Exception as e:
-        print("❌ SHOW ALL ERROR:", e)
         return jsonify({"error": str(e)}), 500
 
 # =========================
@@ -1188,5 +1695,4 @@ def show_all():
 if __name__ == "__main__":
     with app.app_context():
         db.create_all()
-    # ✅ MUST: socketio.run (nie app.run)
     socketio.run(app, host="0.0.0.0", port=int(os.environ.get("PORT", 5000)))
