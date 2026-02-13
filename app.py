@@ -16,7 +16,40 @@ eventlet.monkey_patch()
 
 app = Flask(__name__)
 CORS(app)  # klasické CORS pre REST
-swagger = Swagger(app)
+
+# ✅ Swagger konfigurácia
+app.config['SWAGGER'] = {
+    'title': 'Inteligentná diagnostika API',
+    'uiversion': 3,
+    'openapi': '3.0.2',
+    'description': 'API pre bakalársku prácu - diagnostika vozidiel',
+    'version': '1.0.0',
+    'termsOfService': '',
+    'contact': {
+        'name': 'Jozef Kušnier',
+        'email': '120957@stuba.sk'
+    },
+    'license': {
+        'name': 'MIT'
+    },
+    'servers': [
+        {
+            'url': 'http://localhost:5000',
+            'description': 'Local development server'
+        }
+    ],
+    'components': {
+        'securitySchemes': {
+            'bearerAuth': {
+                'type': 'http',
+                'scheme': 'bearer',
+                'bearerFormat': 'JWT'
+            }
+        }
+    }
+}
+
+swagger = Swagger(app, template=app.config['SWAGGER'])
 
 # ✅ NEW: Socket.IO init (WS)
 socketio = SocketIO(
@@ -158,11 +191,44 @@ class DeviceTelemetry(db.Model):
 # =========================
 @app.route("/init-db")
 def init_db():
+    """
+    Inicializácia databázy
+    ---
+    tags:
+      - System
+    responses:
+      200:
+        description: Databáza úspešne vytvorená
+        schema:
+          type: object
+          properties:
+            status:
+              type: string
+              example: "Database ok"
+    """
     db.create_all()
     return jsonify({"status": "Database ok"})
 
 @app.route("/", methods=["GET"])
 def home():
+    """
+    Health check endpoint
+    ---
+    tags:
+      - System
+    responses:
+      200:
+        description: Server beží
+        schema:
+          type: object
+          properties:
+            status:
+              type: string
+              example: "ok"
+            message:
+              type: string
+              example: "Flask bezi"
+    """
     return jsonify({"status": "ok", "message": "Flask bezi"})
 
 # =========================
@@ -302,6 +368,37 @@ def ws_telemetry(data):
 # =========================
 @app.route("/api/connect", methods=["POST"])
 def device_connect_syn():
+    """
+    3-way handshake - SYN
+    ---
+    tags:
+      - Device Communication
+    parameters:
+      - in: body
+        name: body
+        required: true
+        schema:
+          type: object
+          properties:
+            device_id:
+              type: integer
+              example: 12345
+    responses:
+      200:
+        description: SYN-ACK odpoveď
+        schema:
+          type: object
+          properties:
+            handshake:
+              type: string
+              example: "SYN-ACK"
+            device_id:
+              type: integer
+      400:
+        description: Chýba device_id
+      500:
+        description: Server error
+    """
     try:
         data = request.get_json()
         device_id = data.get("device_id")
@@ -324,6 +421,42 @@ def device_connect_syn():
 
 @app.route("/api/connect/ack", methods=["POST"])
 def device_connect_ack():
+    """
+    3-way handshake - ACK
+    ---
+    tags:
+      - Device Communication
+    parameters:
+      - in: body
+        name: body
+        required: true
+        schema:
+          type: object
+          properties:
+            device_id:
+              type: integer
+              example: 12345
+    responses:
+      200:
+        description: Pripojenie dokončené
+        schema:
+          type: object
+          properties:
+            status:
+              type: string
+              example: "online"
+            device_id:
+              type: integer
+            handshake:
+              type: string
+              example: "ACK-complete"
+      400:
+        description: Chýba device_id
+      404:
+        description: Device not found
+      500:
+        description: Server error
+    """
     try:
         data = request.get_json()
         device_id = data.get("device_id")
@@ -392,6 +525,34 @@ def check_dtc_patterns(vin):
 @app.route("/api/device/<int:device_id>/clear-dtcs", methods=["POST"])
 @jwt_required()
 def clear_device_dtcs(device_id):
+    """
+    Odoslanie príkazu na vymazanie DTC kódov
+    ---
+    tags:
+      - DTC
+    security:
+      - bearerAuth: []
+    parameters:
+      - in: path
+        name: device_id
+        required: true
+        type: integer
+    responses:
+      200:
+        description: Príkaz odoslaný
+        schema:
+          type: object
+          properties:
+            status:
+              type: string
+              example: "waiting"
+            message:
+              type: string
+      404:
+        description: Device not found
+      500:
+        description: Server error
+    """
     try:
         user_id = int(get_jwt_identity())
         user = User.query.get(user_id)
@@ -423,6 +584,38 @@ def clear_device_dtcs(device_id):
 @app.route("/api/device/<int:device_id>/read-dtcs", methods=["POST"])
 @jwt_required()
 def read_device_dtcs(device_id):
+    """
+    Odoslanie príkazu na načítanie DTC kódov
+    ---
+    tags:
+      - DTC
+    security:
+      - bearerAuth: []
+    parameters:
+      - in: path
+        name: device_id
+        required: true
+        type: integer
+    responses:
+      200:
+        description: Príkaz odoslaný
+        schema:
+          type: object
+          properties:
+            status:
+              type: string
+              example: "success"
+            message:
+              type: string
+            device_id:
+              type: integer
+            command:
+              type: string
+      404:
+        description: Device not found
+      500:
+        description: Server error
+    """
     try:
         user_id = int(get_jwt_identity())
         user = User.query.get(user_id)
@@ -531,6 +724,51 @@ def decode_vin_nhtsa():
 @app.route("/api/add-device", methods=["POST"])
 @jwt_required()
 def add_device():
+    """
+    Pridanie nového zariadenia
+    ---
+    tags:
+      - Devices
+    security:
+      - bearerAuth: []
+    parameters:
+      - in: body
+        name: body
+        required: true
+        schema:
+          type: object
+          properties:
+            device_id:
+              type: integer
+              example: 12345
+            user_id:
+              type: integer
+              description: Len pre admina
+              example: 1
+    responses:
+      201:
+        description: Zariadenie pridané
+        schema:
+          type: object
+          properties:
+            status:
+              type: string
+              example: "success"
+            device_id:
+              type: integer
+            assigned_to:
+              type: integer
+            message:
+              type: string
+      400:
+        description: Chybný request
+      401:
+        description: Neautorizovaný
+      409:
+        description: Zariadenie už existuje
+      500:
+        description: Server error
+    """
     try:
         payload = request.get_json()
         device_id_raw = payload.get("device_id")
@@ -578,6 +816,48 @@ def add_device():
 @app.route("/api/device/<int:device_id>/diagnostics", methods=["GET"])
 @jwt_required()
 def device_diagnostics(device_id):
+    """
+    Získanie diagnostických údajov pre zariadenie
+    ---
+    tags:
+      - Devices
+    security:
+      - bearerAuth: []
+    parameters:
+      - in: path
+        name: device_id
+        required: true
+        type: integer
+    responses:
+      200:
+        description: Diagnostické údaje
+        schema:
+          type: object
+          properties:
+            status:
+              type: string
+              example: "success"
+            device_id:
+              type: integer
+            vin:
+              type: string
+            brand:
+              type: string
+            year:
+              type: string
+            model:
+              type: string
+            engine:
+              type: string
+            dtc_codes:
+              type: array
+            online:
+              type: boolean
+      404:
+        description: Device not found
+      500:
+        description: Server error
+    """
     try:
         user_id = int(get_jwt_identity())
         user = User.query.get(user_id)
@@ -646,6 +926,40 @@ def device_diagnostics(device_id):
 @app.route("/api/my-devices", methods=["GET"])
 @jwt_required()
 def my_devices():
+    """
+    Zoznam zariadení prihláseného používateľa
+    ---
+    tags:
+      - Devices
+    security:
+      - bearerAuth: []
+    responses:
+      200:
+        description: Zoznam zariadení
+        schema:
+          type: object
+          properties:
+            status:
+              type: string
+              example: "success"
+            devices:
+              type: array
+              items:
+                type: object
+                properties:
+                  device_id:
+                    type: integer
+                  vin:
+                    type: string
+                  status:
+                    type: string
+                  user_id:
+                    type: integer
+      404:
+        description: User not found
+      500:
+        description: Server error
+    """
     try:
         user_id = int(get_jwt_identity())
         user = User.query.get(user_id)
@@ -682,6 +996,44 @@ def my_devices():
 # =========================
 @app.route("/api/login", methods=["POST"])
 def login():
+    """
+    Prihlásenie používateľa
+    ---
+    tags:
+      - Authentication
+    parameters:
+      - in: body
+        name: body
+        required: true
+        schema:
+          type: object
+          properties:
+            email:
+              type: string
+              example: "user@example.com"
+            password:
+              type: string
+              example: "heslo123"
+    responses:
+      200:
+        description: Úspešné prihlásenie
+        schema:
+          type: object
+          properties:
+            status:
+              type: string
+              example: "success"
+            access_token:
+              type: string
+            role:
+              type: string
+      400:
+        description: Chýbajúce údaje
+      401:
+        description: Nesprávne prihlasovacie údaje
+      500:
+        description: Server error
+    """
     try:
         data = request.get_json()
         email = data.get("email")
@@ -706,6 +1058,42 @@ def login():
 
 @app.route("/api/register", methods=["POST"])
 def register():
+    """
+    Registrácia nového používateľa
+    ---
+    tags:
+      - Authentication
+    parameters:
+      - in: body
+        name: body
+        required: true
+        schema:
+          type: object
+          properties:
+            email:
+              type: string
+              example: "user@example.com"
+            password:
+              type: string
+              example: "heslo123"
+    responses:
+      201:
+        description: Používateľ zaregistrovaný
+        schema:
+          type: object
+          properties:
+            status:
+              type: string
+              example: "success"
+            message:
+              type: string
+      400:
+        description: Chýbajúce údaje
+      409:
+        description: Email už existuje
+      500:
+        description: Server error
+    """
     try:
         data = request.get_json()
         email = data.get("email")
@@ -802,6 +1190,38 @@ def get_dtc_description():
 # =========================
 @app.route("/api/heartbeat", methods=["POST"])
 def heartbeat():
+    """
+    Heartbeat od RPi (keep-alive + command polling)
+    ---
+    tags:
+      - Device Communication
+    parameters:
+      - in: body
+        name: body
+        required: true
+        schema:
+          type: object
+          properties:
+            device_id:
+              type: integer
+              example: 12345
+    responses:
+      200:
+        description: Heartbeat OK alebo command
+        schema:
+          type: object
+          properties:
+            status:
+              type: string
+              example: "ok"
+            command:
+              type: string
+              example: "GET_VIN"
+      400:
+        description: Chýba device_id
+      500:
+        description: Server error
+    """
     try:
         data = request.get_json()
         device_id = data.get("device_id")
@@ -828,6 +1248,41 @@ def heartbeat():
 
 @app.route("/api/trigger", methods=["POST"])
 def trigger_command():
+    """
+    Manuálne spustenie príkazu na zariadení
+    ---
+    tags:
+      - Device Communication
+    parameters:
+      - in: body
+        name: body
+        required: true
+        schema:
+          type: object
+          properties:
+            device_id:
+              type: integer
+              example: 12345
+            command:
+              type: string
+              enum: [GET_VIN, GET_DTCS_PERM, GET_DTCS_PEND, GET_RPM, GET_TEMP, CLEAR_DTCS]
+              example: "GET_VIN"
+    responses:
+      200:
+        description: Príkaz zaradený do fronty
+        schema:
+          type: object
+          properties:
+            status:
+              type: string
+              example: "queued"
+            command:
+              type: string
+      400:
+        description: Neplatný command
+      500:
+        description: Server error
+    """
     try:
         data = request.get_json()
         device_id = data.get("device_id")
@@ -860,8 +1315,50 @@ def trigger_command():
 @app.route("/api/can", methods=["POST"])
 def receive_can_packet():
     """
-    RPi pošle VIN, DTC alebo clear_status po CLEAR_DTCS akcii.
-    + ✅ NOVÉ: ak pošle telemetry, uloží sa + pushne cez WS.
+    Príjem CAN packetov z RPi (VIN, DTC, clear_status, telemetria)
+    ---
+    tags:
+      - Device Communication
+    parameters:
+      - in: body
+        name: body
+        required: true
+        schema:
+          type: object
+          properties:
+            device_id:
+              type: integer
+              example: 12345
+            vin:
+              type: string
+              example: "1HGCM82633A123456"
+            dtc_code:
+              type: string
+              example: "P0300"
+            clear_status:
+              type: string
+              enum: [ok, failed]
+            odometer:
+              type: integer
+            battery:
+              type: object
+            engine:
+              type: object
+            fuel:
+              type: object
+            speed:
+              type: integer
+    responses:
+      201:
+        description: Dáta spracované
+      200:
+        description: OK
+      400:
+        description: Chybný request
+      404:
+        description: Device not found
+      500:
+        description: Server error
     """
     try:
         payload = request.get_json()
