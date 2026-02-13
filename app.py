@@ -1,26 +1,33 @@
 from flask import Flask, request, jsonify
 from flask_sqlalchemy import SQLAlchemy
 from flasgger import Swagger
-from datetime import datetime
+from datetime import datetime, timedelta
 import os
 import requests
 from flask_cors import CORS
 import csv
-import requests
 from io import StringIO
-from flask import jsonify
-from datetime import datetime, timedelta
-from flask_jwt_extended import JWTManager, create_access_token, jwt_required, get_jwt_identity  # Overenie importu
+from flask_jwt_extended import JWTManager, create_access_token, jwt_required, get_jwt_identity
 
-
+# ✅ NEW: WebSocket (Socket.IO)
+from flask_socketio import SocketIO, emit, join_room
+import eventlet
+eventlet.monkey_patch()
 
 app = Flask(__name__)
-CORS(app)
+CORS(app)  # klasické CORS pre REST
 swagger = Swagger(app)
 
+# ✅ NEW: Socket.IO init (WS)
+socketio = SocketIO(
+    app,
+    cors_allowed_origins="*",
+    async_mode="eventlet"
+)
+
 # Konfigurácia JWT
-app.config["JWT_SECRET_KEY"] = os.environ.get("JWT_SECRET_KEY", "your-secret-key")  # Nahraďte vlastným tajným kľúčom
-app.config["JWT_ACCESS_TOKEN_EXPIRES"] = timedelta(hours=1)  # Token platný 1 hodinu
+app.config["JWT_SECRET_KEY"] = os.environ.get("JWT_SECRET_KEY", "your-secret-key")
+app.config["JWT_ACCESS_TOKEN_EXPIRES"] = timedelta(hours=1)
 jwt = JWTManager(app)
 
 # DATABAZA
@@ -33,8 +40,10 @@ elif db_url.startswith("postgresql://") and "+psycopg" not in db_url:
 app.config["SQLALCHEMY_DATABASE_URI"] = db_url
 app.config["SQLALCHEMY_TRACK_MODIFICATIONS"] = False
 db = SQLAlchemy(app)
-## toto je test ci funguje git
+
+# =========================
 # MODELY DB
+# =========================
 class DeviceUser(db.Model):
     __tablename__ = "device_user"
     user_id = db.Column(db.Integer, db.ForeignKey("users.id"), primary_key=True)
@@ -47,7 +56,7 @@ class User(db.Model):
     password = db.Column(db.String(255), nullable=False)
     role = db.Column(db.String(50), default="user")
     email = db.Column(db.String(120), unique=True, nullable=False)
-    devices = db.relationship("Device", backref="user", lazy=True, cascade="all, delete")    
+    devices = db.relationship("Device", backref="user", lazy=True, cascade="all, delete")
 
 class Device(db.Model):
     __tablename__ = "device"
@@ -67,12 +76,11 @@ class Vehicle(db.Model):
     __tablename__ = "vehicles"
     id = db.Column(db.Integer, primary_key=True)
     vin = db.Column(db.String(50), unique=True, nullable=False)
-    # ➕ NOVÉ STĹPCE
     year = db.Column(db.String(10), nullable=True)
     brand = db.Column(db.String(10), nullable=True)
     model = db.Column(db.String(100), nullable=True)
     engine = db.Column(db.String(100), nullable=True)
-    
+
     dtcs_active = db.relationship("DTCCodeActive", backref="vehicle", lazy=True, cascade="all, delete")
     dtcs_history = db.relationship("DTCCodeHistory", backref="vehicle", lazy=True, cascade="all, delete")
 
@@ -92,7 +100,6 @@ class DTCCodeHistory(db.Model):
     severity = db.Column(db.String(20), default="medium")
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
 
-# PRIDAJ SEM – hneď za class DTCCode(db.Model): ...
 class PendingCommand(db.Model):
     __tablename__ = "pending_commands"
     id = db.Column(db.Integer, primary_key=True)
@@ -100,19 +107,15 @@ class PendingCommand(db.Model):
     command = db.Column(db.String(50), nullable=False)
     executed = db.Column(db.Boolean, default=False)
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
-# --- DTC CODES DATABASE MODEL ---
+
 class DtcCodeMeaning(db.Model):
     __tablename__ = "dtc_codes_meaning"
     id = db.Column(db.Integer, primary_key=True)
     dtc_code = db.Column(db.String(20), unique=True, nullable=False)
     dtc_description = db.Column(db.Text, nullable=True)
-# =========================
-# 🔗 DTC PATTERN DATABASE
-# =========================
 
 class DtcPattern(db.Model):
     __tablename__ = "dtc_patterns"
-
     id = db.Column(db.Integer, primary_key=True)
     name = db.Column(db.String(120), nullable=False)
     primary_cause = db.Column(db.String(255), nullable=False)
@@ -120,25 +123,20 @@ class DtcPattern(db.Model):
 
 class DtcPatternLink(db.Model):
     __tablename__ = "dtc_pattern_links"
-
     id = db.Column(db.Integer, primary_key=True)
     pattern_id = db.Column(db.Integer, db.ForeignKey("dtc_patterns.id"), nullable=False)
     dtc_code = db.Column(db.String(20), nullable=False)
 
 class DeviceTelemetry(db.Model):
     __tablename__ = "device_telemetry"
-
     id = db.Column(db.Integer, primary_key=True)
     device_id = db.Column(db.Integer, db.ForeignKey("device.id"), nullable=False, index=True)
 
-    # odometer (km)
     odometer = db.Column(db.Integer, nullable=True)
 
-    # battery
     battery_voltage = db.Column(db.Float, nullable=True)
     battery_health = db.Column(db.String(30), nullable=True)
 
-    # engine
     engine_running = db.Column(db.Boolean, nullable=True)
     engine_rpm = db.Column(db.Integer, nullable=True)
     engine_load = db.Column(db.Float, nullable=True)
@@ -146,39 +144,30 @@ class DeviceTelemetry(db.Model):
     oil_temp = db.Column(db.Integer, nullable=True)
     intake_air_temp = db.Column(db.Integer, nullable=True)
 
-    # fuel
     consumption_lh = db.Column(db.Float, nullable=True)
     consumption_l100km = db.Column(db.Float, nullable=True)
     maf = db.Column(db.Float, nullable=True)
     fuel_type = db.Column(db.String(20), nullable=True)
 
-    # speed (km/h)
     speed = db.Column(db.Integer, nullable=True)
 
     created_at = db.Column(db.DateTime, default=datetime.utcnow, index=True)
 
-
-
+# =========================
+# INIT / HEALTH
+# =========================
 @app.route("/init-db")
 def init_db():
     db.create_all()
     return jsonify({"status": "Database ok"})
 
-# get na konrolu
 @app.route("/", methods=["GET"])
 def home():
     return jsonify({"status": "ok", "message": "Flask bezi"})
 
-import requests
-from flask import Flask, jsonify, request
-
-
-# ============================
-# 🔐 3-WAY HANDSHAKE (SYN, SYN-ACK, ACK)
-# ============================
-# ============================
-# 🧠 KEYWORD SEVERITY RULES
-# ============================
+# =========================
+# SEVERITY
+# =========================
 CRITICAL_KEYWORDS = [
     "misfire", "stall", "overheat", "knock", "no start",
     "oil pressure", "detonation", "shaft", "timing",
@@ -191,28 +180,128 @@ LOW_KEYWORDS = [
     "sensor circuit low", "cosmetic"
 ]
 
-
 def detect_severity_from_description(description: str) -> str:
     if not description:
         return "medium"
-
     text = description.lower()
-
     for word in CRITICAL_KEYWORDS:
         if word in text:
             return "critical"
-
     for word in LOW_KEYWORDS:
         if word in text:
             return "low"
-
     return "medium"
 
+# =========================
+# ✅ NEW: SOCKET.IO HELPERS
+# =========================
+def _iso(ts: datetime | None) -> str | None:
+    if not ts:
+        return None
+    return ts.replace(microsecond=0).isoformat() + "Z"
+
+def _telemetry_payload(device_id: int, payload: dict) -> dict:
+    # jednotný formát pre FE
+    return {
+        "device_id": device_id,
+        "odometer": payload.get("odometer"),
+        "battery": payload.get("battery"),
+        "engine": payload.get("engine"),
+        "fuel": payload.get("fuel"),
+        "speed": payload.get("speed"),
+        "timestamp": payload.get("timestamp") or _iso(datetime.utcnow()),
+    }
+
+def _save_telemetry_to_db(device_id: int, t: dict) -> None:
+    # DB je voliteľné, ale už to máš v projekte -> ulož
+    try:
+        battery = t.get("battery") or {}
+        engine = t.get("engine") or {}
+        fuel = t.get("fuel") or {}
+
+        row = DeviceTelemetry(
+            device_id=device_id,
+            odometer=t.get("odometer"),
+            battery_voltage=battery.get("battery_voltage"),
+            battery_health=battery.get("health"),
+            engine_running=engine.get("running"),
+            engine_rpm=engine.get("rpm"),
+            engine_load=engine.get("load"),
+            coolant_temp=engine.get("coolant_temp"),
+            oil_temp=engine.get("oil_temp"),
+            intake_air_temp=engine.get("intake_air_temp"),
+            consumption_lh=fuel.get("consumption_lh"),
+            consumption_l100km=fuel.get("consumption_l100km"),
+            maf=fuel.get("maf"),
+            fuel_type=fuel.get("type"),
+            speed=t.get("speed"),
+            created_at=datetime.utcnow(),
+        )
+        db.session.add(row)
+        db.session.commit()
+    except Exception:
+        db.session.rollback()
+
+# =========================
+# ✅ NEW: SOCKET.IO EVENTS
+# =========================
+@socketio.on("connect")
+def ws_connect():
+    emit("server_ready", {"status": "ok"})
+
+@socketio.on("subscribe_device")
+def ws_subscribe_device(data):
+    """
+    FE: socket.emit("subscribe_device", {device_id: 1})
+    """
+    try:
+        device_id = int(data.get("device_id"))
+    except Exception:
+        emit("error", {"error": "invalid device_id"})
+        return
+
+    join_room(f"device:{device_id}")
+    emit("subscribed", {"device_id": device_id})
+
+@socketio.on("telemetry")
+def ws_telemetry(data):
+    """
+    RPi (alebo test client) posiela realtime telemetry cez WS.
+    Server to uloží + pushne FE.
+    """
+    try:
+        device_id = int(data.get("device_id"))
+    except Exception:
+        emit("error", {"error": "missing/invalid device_id"})
+        return
+
+    device = Device.query.get(device_id)
+    if not device:
+        emit("error", {"error": "device not found"})
+        return
+
+    # realtime payload
+    t = _telemetry_payload(device_id, data)
+
+    # mark device online (keď posiela telemetry, je online)
+    try:
+        device.status = True
+        db.session.commit()
+    except Exception:
+        db.session.rollback()
+
+    # uloz do DB (ak chces)
+    _save_telemetry_to_db(device_id, t)
+
+    # PUSH do FE
+    socketio.emit("telemetry_update", t, room=f"device:{device_id}")
+    emit("telemetry_ack", {"ok": True, "timestamp": t["timestamp"]})
+
+# =========================
+# 3-WAY HANDSHAKE
+# =========================
 @app.route("/api/connect", methods=["POST"])
 def device_connect_syn():
-    """
-    1. RPi pošle SYN ⇒ server odpovie SYN-ACK
-    """
     try:
         data = request.get_json()
         device_id = data.get("device_id")
@@ -225,24 +314,16 @@ def device_connect_syn():
             device = Device(id=device_id, status=False)
             db.session.add(device)
         else:
-            device.status = False  # ešte nie je potvrdené
+            device.status = False
 
         db.session.commit()
 
-        return jsonify({
-            "handshake": "SYN-ACK",
-            "device_id": device_id
-        }), 200
-
+        return jsonify({"handshake": "SYN-ACK", "device_id": device_id}), 200
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
-
 @app.route("/api/connect/ack", methods=["POST"])
 def device_connect_ack():
-    """
-    2. RPi pošle ACK ⇒ označíme device ako ONLINE
-    """
     try:
         data = request.get_json()
         device_id = data.get("device_id")
@@ -254,36 +335,24 @@ def device_connect_ack():
         if not device:
             return jsonify({"error": "device not found"}), 404
 
-        device.status = True  # teraz je oficiálne online
+        device.status = True
         db.session.commit()
 
-        return jsonify({
-            "status": "online",
-            "device_id": device_id,
-            "handshake": "ACK-complete"
-        }), 200
-
+        return jsonify({"status": "online", "device_id": device_id, "handshake": "ACK-complete"}), 200
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
-
+# =========================
+# PATTERN CHECK
+# =========================
 @app.route("/api/dtc/pattern-check/<vin>", methods=["GET"])
 @jwt_required(optional=True)
 def check_dtc_patterns(vin):
-    """
-    Skontroluje DTC kombinácie k VIN a vráti
-    IBA tie patterny, ktoré sú SPLNENÉ NA 100 %.
-    """
-
     vehicle = Vehicle.query.filter_by(vin=vin.upper()).first()
     if not vehicle:
         return jsonify({"error": "Vehicle not found"}), 404
 
-    # Aktívne DTC vozidla
-    active_dtcs = set(
-        d.dtc_code.upper()
-        for d in DTCCodeActive.query.filter_by(vin_id=vehicle.id)
-    )
+    active_dtcs = set(d.dtc_code.upper() for d in DTCCodeActive.query.filter_by(vin_id=vehicle.id))
 
     if not active_dtcs:
         return jsonify({
@@ -294,19 +363,14 @@ def check_dtc_patterns(vin):
         }), 200
 
     matched_patterns = []
-
     patterns = DtcPattern.query.all()
 
     for pattern in patterns:
-
         pattern_codes = set(
             l.dtc_code.upper()
             for l in DtcPatternLink.query.filter_by(pattern_id=pattern.id)
         )
-
-        # presná zhoda: všetky DTC z patternu musia existovať
         if pattern_codes.issubset(active_dtcs):
-
             matched_patterns.append({
                 "pattern_id": pattern.id,
                 "pattern_name": pattern.name,
@@ -322,26 +386,18 @@ def check_dtc_patterns(vin):
         "matched_patterns": matched_patterns
     }), 200
 
-
-
+# =========================
+# CLEAR / READ DTC (pending commands)
+# =========================
 @app.route("/api/device/<int:device_id>/clear-dtcs", methods=["POST"])
 @jwt_required()
 def clear_device_dtcs(device_id):
-    """
-    Namiesto vymazania DTC z DB teraz:
-    ➤ vytvorí pending command CLEAR_DTCS
-    ➤ RPi vymaže chyby v aute
-    ➤ RPi neskôr pošle výsledok clear_status cez /api/can
-    """
-
     try:
         user_id = int(get_jwt_identity())
         user = User.query.get(user_id)
-
         if not user:
             return jsonify({"error": "User not found"}), 404
 
-        # Kontrola vlastníctva ako predtým
         if user.role == "admin":
             device = Device.query.get(device_id)
         else:
@@ -350,11 +406,6 @@ def clear_device_dtcs(device_id):
         if not device:
             return jsonify({"error": "Device not found or not owned by user"}), 404
 
-        # ⚠️ TOTO SME ODSTRÁNILI:
-        # deleted_count = DTCCodeActive.query.filter_by(vin_id=vin_id).delete()
-        # teraz sa DB nemaže hneď!
-
-        # ➕ NOVÉ: vytvoríme príkaz
         cmd = PendingCommand(device_id=device_id, command="CLEAR_DTCS")
         db.session.add(cmd)
         db.session.commit()
@@ -369,19 +420,48 @@ def clear_device_dtcs(device_id):
         print("❌ CLEAR DEVICE DTCS ERROR:", e)
         return jsonify({"error": str(e)}), 500
 
+@app.route("/api/device/<int:device_id>/read-dtcs", methods=["POST"])
+@jwt_required()
+def read_device_dtcs(device_id):
+    try:
+        user_id = int(get_jwt_identity())
+        user = User.query.get(user_id)
+        if not user:
+            return jsonify({"error": "User not found"}), 404
 
+        if user.role == "admin":
+            device = Device.query.get(device_id)
+        else:
+            device = Device.query.filter_by(id=device_id, user_id=user_id).first()
+
+        if not device:
+            return jsonify({"error": "Device not found or not owned by user"}), 404
+
+        cmd = PendingCommand(device_id=device_id, command="GET_DTCS_PERM")
+        db.session.add(cmd)
+        db.session.commit()
+
+        return jsonify({
+            "status": "success",
+            "message": "Read DTC command sent to device",
+            "device_id": device_id,
+            "command": "GET_DTCS_PERM"
+        }), 200
+
+    except Exception as e:
+        db.session.rollback()
+        print("❌ READ DEVICE DTCS ERROR:", e)
+        return jsonify({"error": str(e)}), 500
+
+# =========================
+# DTC HISTORY FULL
+# =========================
 @app.route("/api/dtc-history-full", methods=["POST"])
 @jwt_required(optional=True)
 def dtc_history_full():
-    """
-    Vráti úplnú históriu DTC kódov pre dané VIN,
-    vrátane popisu chyby z tabuľky dtc_codes_meaning.
-    Prístupné pre všetkých prihlásených aj neprihlásených.
-    """
     try:
         data = request.get_json()
         vin = data.get("vin")
-
         if not vin:
             return jsonify({"error": "Missing 'vin' parameter"}), 400
 
@@ -401,33 +481,23 @@ def dtc_history_full():
             .all()
         )
 
-        results = [
-            {
-                "dtc_code": h.dtc_code,
-                "description": h.dtc_description or "No description available",
-                "created_at": h.created_at.isoformat()
-            }
-            for h in history
-        ]
+        results = [{
+            "dtc_code": h.dtc_code,
+            "description": h.dtc_description or "No description available",
+            "created_at": h.created_at.isoformat()
+        } for h in history]
 
-        return jsonify({
-            "status": "success",
-            "vin": vin.upper(),
-            "history": results
-        }), 200
+        return jsonify({"status": "success", "vin": vin.upper(), "history": results}), 200
 
     except Exception as e:
         print("❌ DTC HISTORY FULL ERROR:", e)
         return jsonify({"error": str(e)}), 500
 
-
-
-
+# =========================
+# VIN decode NHTSA
+# =========================
 @app.route("/api/vin/nhtsa", methods=["POST"])
 def decode_vin_nhtsa():
-    """
-    Dekóduje VIN pomocou NHTSA (bez API kľúča, zdarma)
-    """
     try:
         payload = request.get_json()
         vin = payload.get("vin")
@@ -455,63 +525,22 @@ def decode_vin_nhtsa():
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
-
-@app.route("/api/device/<int:device_id>/read-dtcs", methods=["POST"])
-@jwt_required()
-def read_device_dtcs(device_id):
-    """
-    Pošle príkaz GET_DTCS_PERM na zariadenie pre čítanie DTC kódov.
-    """
-    try:
-        user_id = int(get_jwt_identity())
-        user = User.query.get(user_id)
-
-        if not user:
-            return jsonify({"error": "User not found"}), 404
-
-        # Kontrola vlastníctva
-        if user.role == "admin":
-            device = Device.query.get(device_id)
-        else:
-            device = Device.query.filter_by(id=device_id, user_id=user_id).first()
-
-        if not device:
-            return jsonify({"error": "Device not found or not owned by user"}), 404
-
-        # Vytvoríme príkaz GET_DTCS_PERM
-        cmd = PendingCommand(device_id=device_id, command="GET_DTCS_PERM")
-        db.session.add(cmd)
-        db.session.commit()
-
-        return jsonify({
-            "status": "success",
-            "message": "Read DTC command sent to device",
-            "device_id": device_id,
-            "command": "GET_DTCS_PERM"
-        }), 200
-
-    except Exception as e:
-        db.session.rollback()
-        print("❌ READ DEVICE DTCS ERROR:", e)
-        return jsonify({"error": str(e)}), 500
-
+# =========================
+# ADD DEVICE
+# =========================
 @app.route("/api/add-device", methods=["POST"])
 @jwt_required()
 def add_device():
-    """
-    Pridá nové zariadenie (device) do databázy.
-    """
     try:
         payload = request.get_json()
         device_id_raw = payload.get("device_id")
-        target_user_id = payload.get("user_id")  # 👈 admin zadá user_id
+        target_user_id = payload.get("user_id")
         current_user_id = int(get_jwt_identity())
         current_user = User.query.get(current_user_id)
 
         if not current_user:
             return jsonify({"error": "User not found"}), 404
 
-        # 🔐 ak nie je admin, môže pridať len sebe
         if current_user.role != "admin":
             target_user_id = current_user.id
 
@@ -527,7 +556,6 @@ def add_device():
         if existing:
             return jsonify({"error": f"Device ID {device_id} already exists"}), 409
 
-        # ✅ pridanie zariadenia
         new_device = Device(id=device_id, user_id=int(target_user_id), status=False)
         db.session.add(new_device)
         db.session.commit()
@@ -544,23 +572,18 @@ def add_device():
         print("❌ ADD DEVICE ERROR:", e)
         return jsonify({"error": str(e)}), 500
 
-
-
-
+# =========================
+# DEVICE DIAGNOSTICS
+# =========================
 @app.route("/api/device/<int:device_id>/diagnostics", methods=["GET"])
 @jwt_required()
 def device_diagnostics(device_id):
-    """
-    Vráti DTC kódy, popis a VIN pre konkrétne zariadenie.
-    """
     try:
         user_id = int(get_jwt_identity())
         user = User.query.get(user_id)
-
         if not user:
             return jsonify({"error": "User not found"}), 404
 
-        # 👑 Admin môže vidieť všetko
         if user.role == "admin":
             device = Device.query.get(device_id)
         else:
@@ -569,11 +592,7 @@ def device_diagnostics(device_id):
         if not device:
             return jsonify({"error": "Device not found or not owned by user"}), 404
 
-        vin = None
-        year = None
-        brand = None
-        model = None
-        engine = None
+        vin = year = brand = model = engine = None
         dtcs = []
 
         if device.link and len(device.link) > 0 and device.link[0].last_vin_id:
@@ -585,12 +604,11 @@ def device_diagnostics(device_id):
                 model = vin_obj.model
                 engine = vin_obj.engine
 
-                # 🧩 Join s tabuľkou dtc_codes_meaning kvôli popisu
                 dtcs_query = (
                     db.session.query(
                         DTCCodeActive.dtc_code,
                         DTCCodeActive.created_at,
-                        DTCCodeActive.severity,  # 👈 PRIDANÉ
+                        DTCCodeActive.severity,
                         DtcCodeMeaning.dtc_description
                     )
                     .outerjoin(DtcCodeMeaning, DTCCodeActive.dtc_code == DtcCodeMeaning.dtc_code)
@@ -599,15 +617,12 @@ def device_diagnostics(device_id):
                     .all()
                 )
 
-                dtcs = [
-                    {
-                        "dtc_code": d.dtc_code,
-                        "description": d.dtc_description or "No description",
-                        "severity": d.severity or "medium",  # 👈 PRIDANÉ
-                        "created_at": d.created_at.isoformat() if d.created_at else None,
-                    }
-                    for d in dtcs_query
-                ]
+                dtcs = [{
+                    "dtc_code": d.dtc_code,
+                    "description": d.dtc_description or "No description",
+                    "severity": d.severity or "medium",
+                    "created_at": d.created_at.isoformat() if d.created_at else None,
+                } for d in dtcs_query]
 
         return jsonify({
             "status": "success",
@@ -625,25 +640,18 @@ def device_diagnostics(device_id):
         print("❌ DEVICE DIAGNOSTICS ERROR:", e)
         return jsonify({"error": str(e)}), 500
 
-
-
-
-
+# =========================
+# MY DEVICES
+# =========================
 @app.route("/api/my-devices", methods=["GET"])
 @jwt_required()
 def my_devices():
-    """
-    Vráti všetky zariadenia prihláseného používateľa,
-    spolu s VIN a online statusom.
-    """
     try:
         user_id = int(get_jwt_identity())
         user = User.query.get(user_id)
-
         if not user:
             return jsonify({"error": "User not found"}), 404
 
-        # 👑 ak admin → všetky devices
         if user.role == "admin":
             devices = Device.query.all()
         else:
@@ -660,7 +668,7 @@ def my_devices():
                 "device_id": d.id,
                 "vin": vin,
                 "status": "Online" if d.status else "Offline",
-                "user_id": d.user_id  # 👈 pre admina
+                "user_id": d.user_id
             })
 
         return jsonify({"status": "success", "devices": result}), 200
@@ -669,35 +677,11 @@ def my_devices():
         print("❌ MY DEVICES ERROR:", e)
         return jsonify({"error": str(e)}), 500
 
-
-
-# Endpoint pre prihlásenie
+# =========================
+# LOGIN / REGISTER
+# =========================
 @app.route("/api/login", methods=["POST"])
 def login():
-    """
-    Prihlásenie používateľa a vrátenie JWT tokenu.
-    ---
-    tags:
-      - Authentication
-    parameters:
-      - in: body
-        name: body
-        required: true
-        schema:
-          type: object
-          properties:
-            email:
-              type: string
-              example: "user@example.com"
-            password:
-              type: string
-              example: "password123"
-    responses:
-      200:
-        description: Úspešné prihlásenie s JWT tokenom
-      401:
-        description: Neplatné prihlasovacie údaje
-    """
     try:
         data = request.get_json()
         email = data.get("email")
@@ -710,132 +694,11 @@ def login():
         if not user or user.password != password:
             return jsonify({"error": "Invalid credentials"}), 401
 
-        # 🔑 Generovanie JWT tokenu
         access_token = create_access_token(identity=str(user.id))
         return jsonify({
             "status": "success",
             "access_token": access_token,
-            "role": user.role   # 👈 pošleme rolu do FE
-        }), 200
-
-    except Exception as e:
-        return jsonify({"error": str(e)}), 500
-
-
-
-
-@app.route("/api/load-dtc-codes", methods=["POST"])
-def load_dtc_codes_from_csv():
-    """
-    Načíta DTC kódy z CSV súboru (napr. uloženého na GitHube) a uloží ich do databázy.
-    ---
-    tags:
-      - DTC Codes
-    parameters:
-      - in: body
-        name: body
-        required: true
-        schema:
-          type: object
-          properties:
-            csv_url:
-              type: string
-              example: "https://raw.githubusercontent.com/xkusnier/car-diagnostics/main/dtc_converted.csv"
-    responses:
-      200:
-        description: DTC kódy boli úspešne nahraté do databázy
-    """
-    try:
-        payload = request.get_json()
-        csv_url = payload.get("csv_url")
-
-        if not csv_url:
-            return jsonify({"error": "Missing 'csv_url' parameter"}), 400
-
-        # ✅ Stiahni CSV z GitHubu (RAW link)
-        response = requests.get(csv_url)
-        if response.status_code != 200:
-            return jsonify({"error": f"Failed to fetch CSV: {response.status_code}"}), 400
-
-        csv_text = response.text
-        csv_reader = csv.reader(StringIO(csv_text))
-
-        inserted, skipped = 0, 0
-
-        for row in csv_reader:
-            if len(row) < 2:
-                continue
-
-            dtc_code = row[0].strip()
-            dtc_description = row[1].strip()
-
-            # ✅ Skontroluj, či DTC už existuje
-            if DtcCodeMeaning.query.filter_by(dtc_code=dtc_code).first():
-                skipped += 1
-                continue
-
-            db.session.add(DtcCodeMeaning(dtc_code=dtc_code, dtc_description=dtc_description))
-            inserted += 1
-
-        db.session.commit()
-
-        return jsonify({
-            "status": "success",
-            "inserted": inserted,
-            "skipped_existing": skipped
-        }), 200
-
-    except Exception as e:
-        db.session.rollback()
-        return jsonify({"error": str(e)}), 500
-
-
-
-@app.route("/api/dtc-description", methods=["POST"])
-def get_dtc_description():
-    """
-    Získa textový popis DTC kódu z databázy.
-    ---
-    tags:
-      - DTC Codes
-    parameters:
-      - in: body
-        name: body
-        required: true
-        schema:
-          type: object
-          properties:
-            dtc_code:
-              type: string
-              example: "P0263"
-    responses:
-      200:
-        description: Popis DTC kódu
-      404:
-        description: Kód neexistuje v databáze
-    """
-    try:
-        payload = request.get_json()
-        dtc_code = payload.get("dtc_code")
-
-        if not dtc_code:
-            return jsonify({"error": "Missing 'dtc_code' parameter"}), 400
-
-        # Vyhľadanie v databáze (case-insensitive)
-        record = DtcCodeMeaning.query.filter(
-            db.func.lower(DtcCodeMeaning.dtc_code) == dtc_code.lower()
-        ).first()
-
-        if not record:
-            return jsonify({
-                "status": "not_found",
-                "message": f"DTC code '{dtc_code}' not found in database."
-            }), 404
-
-        return jsonify({
-            "status": "success",
-            "dtc_code": record.dtc_code,
-            "description": record.dtc_description
+            "role": user.role
         }), 200
 
     except Exception as e:
@@ -863,35 +726,88 @@ def register():
         db.session.rollback()
         return jsonify({"error": str(e)}), 500
 
+# =========================
+# LOAD DTC CSV
+# =========================
+@app.route("/api/load-dtc-codes", methods=["POST"])
+def load_dtc_codes_from_csv():
+    try:
+        payload = request.get_json()
+        csv_url = payload.get("csv_url")
+
+        if not csv_url:
+            return jsonify({"error": "Missing 'csv_url' parameter"}), 400
+
+        response = requests.get(csv_url)
+        if response.status_code != 200:
+            return jsonify({"error": f"Failed to fetch CSV: {response.status_code}"}), 400
+
+        csv_text = response.text
+        csv_reader = csv.reader(StringIO(csv_text))
+
+        inserted, skipped = 0, 0
+
+        for row in csv_reader:
+            if len(row) < 2:
+                continue
+
+            dtc_code = row[0].strip()
+            dtc_description = row[1].strip()
+
+            if DtcCodeMeaning.query.filter_by(dtc_code=dtc_code).first():
+                skipped += 1
+                continue
+
+            db.session.add(DtcCodeMeaning(dtc_code=dtc_code, dtc_description=dtc_description))
+            inserted += 1
+
+        db.session.commit()
+
+        return jsonify({"status": "success", "inserted": inserted, "skipped_existing": skipped}), 200
+
+    except Exception as e:
+        db.session.rollback()
+        return jsonify({"error": str(e)}), 500
+
+@app.route("/api/dtc-description", methods=["POST"])
+def get_dtc_description():
+    try:
+        payload = request.get_json()
+        dtc_code = payload.get("dtc_code")
+
+        if not dtc_code:
+            return jsonify({"error": "Missing 'dtc_code' parameter"}), 400
+
+        record = DtcCodeMeaning.query.filter(
+            db.func.lower(DtcCodeMeaning.dtc_code) == dtc_code.lower()
+        ).first()
+
+        if not record:
+            return jsonify({
+                "status": "not_found",
+                "message": f"DTC code '{dtc_code}' not found in database."
+            }), 404
+
+        return jsonify({
+            "status": "success",
+            "dtc_code": record.dtc_code,
+            "description": record.dtc_description
+        }), 200
+
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+# =========================
+# HEARTBEAT / TRIGGER
+# =========================
 @app.route("/api/heartbeat", methods=["POST"])
 def heartbeat():
-    """
-    RPi sa hlási každých 30s. Server vráti príkaz (ak je).
-    ---
-    tags:
-      - Device
-    parameters:
-      - in: body
-        name: body
-        schema:
-          properties:
-            device_id: {type: integer, example: 1}
-    responses:
-      200:
-        description: OK alebo príkaz
-        examples:
-          application/json:
-            status: ok
-          application/json:
-            command: GET_VIN
-    """
     try:
         data = request.get_json()
         device_id = data.get("device_id")
         if not device_id:
             return jsonify({"error": "missing device_id"}), 400
 
-        # Aktualizuj device
         device = Device.query.get(device_id)
         if not device:
             device = Device(id=device_id, status=True)
@@ -900,7 +816,6 @@ def heartbeat():
             device.status = True
         db.session.commit()
 
-        # Skontroluj čakajúci príkaz
         cmd = PendingCommand.query.filter_by(device_id=device_id, executed=False).first()
         if cmd:
             cmd.executed = True
@@ -913,29 +828,11 @@ def heartbeat():
 
 @app.route("/api/trigger", methods=["POST"])
 def trigger_command():
-    """
-    Admin pošle príkaz na RPi
-    ---
-    tags:
-      - Admin
-    security:
-      - Bearer: []
-    parameters:
-      - in: body
-        name: body
-        schema:
-          properties:
-            device_id: {type: integer, example: 1}
-            command: {type: string, enum: [GET_VIN, GET_DTCS_PERM, GET_DTCS_PEND, GET_RPM, GET_TEMP, CLEAR_DTCS]}
-    responses:
-      200: {description: Príkaz zaradený}
-    """
     try:
         data = request.get_json()
         device_id = data.get("device_id")
         command = data.get("command")
 
-        # CLEAR_DTCS patrí medzi povolené príkazy
         valid_commands = [
             "GET_VIN",
             "GET_DTCS_PERM",
@@ -957,24 +854,25 @@ def trigger_command():
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
-
+# =========================
+# CAN endpoint (VIN/DTC/CLEAR) + ✅ NEW: TELEMETRY via REST also pushes WS
+# =========================
 @app.route("/api/can", methods=["POST"])
 def receive_can_packet():
     """
     RPi pošle VIN, DTC alebo clear_status po CLEAR_DTCS akcii.
+    + ✅ NOVÉ: ak pošle telemetry, uloží sa + pushne cez WS.
     """
     try:
         payload = request.get_json()
         device_id = payload.get("device_id")
         vin = payload.get("vin")
         dtc_code = payload.get("dtc_code")
-        
-        # ➕ NOVÉ: výsledok CLEAR_DTCS
-        clear_status = payload.get("clear_status")  # "ok" alebo "fail"
+        clear_status = payload.get("clear_status")
 
-        # ➕ NOVÉ: dodatočné informácie o vozidle
+        # extra vehicle info
         year = payload.get("year")
-        model = payload.get("model") 
+        model = payload.get("model")
         brand = payload.get("brand")
         engine = payload.get("engine")
 
@@ -985,29 +883,33 @@ def receive_can_packet():
         if not device:
             return jsonify({"error": f"Device {device_id} not found"}), 404
 
-        # -----------------------------------
-        # 1️⃣ NOVÁ LOGIKA: CLEAR_DTCS potvrdenie
-        # -----------------------------------
+        # ✅ NEW: TELEMETRY via REST
+        # RPi môže poslať telemetry v tom istom /api/can payload-e:
+        # odometer, battery{..}, engine{..}, fuel{..}, speed
+        if any(k in payload for k in ["odometer", "battery", "engine", "fuel", "speed"]):
+            t = _telemetry_payload(int(device_id), payload)
+            device.status = True
+            db.session.commit()
+
+            _save_telemetry_to_db(int(device_id), t)
+            socketio.emit("telemetry_update", t, room=f"device:{int(device_id)}")
+
+            return jsonify({"status": "telemetry stored", "device_id": int(device_id), "timestamp": t["timestamp"]}), 201
+
+        # 1) CLEAR_DTCS confirmation
         if clear_status is not None:
             state = DeviceVehicle.query.filter_by(device_id=device_id).first()
-
             if not state or not state.last_vin_id:
                 return jsonify({"error": "No VIN associated for clear"}), 400
 
             if clear_status == "ok":
                 DTCCodeActive.query.filter_by(vin_id=state.last_vin_id).delete()
                 db.session.commit()
+                return jsonify({"status": "DTC cleared", "vin_id": state.last_vin_id}), 200
 
-                return jsonify({
-                    "status": "DTC cleared",
-                    "vin_id": state.last_vin_id
-                }), 200
-            
             return jsonify({"status": "Clear failed"}), 200
 
-        # -----------------------------------
-        # 2️⃣ ROZŠÍRENÉ spracovanie VIN s dodatočnými informáciami
-        # -----------------------------------
+        # 2) VIN
         if vin:
             vin = vin.strip().upper()
             if len(vin) != 17:
@@ -1015,37 +917,31 @@ def receive_can_packet():
 
             vehicle = Vehicle.query.filter_by(vin=vin).first()
             if not vehicle:
-                # ➕ Vytvoríme nové vozidlo s dodatočnými informáciami
                 vehicle = Vehicle(vin=vin)
-                
-                # ✅ Pridáme nové polia AK EXISTUJÚ v modeli
-                if hasattr(Vehicle, 'year') and year:
+                if hasattr(Vehicle, "year") and year:
                     vehicle.year = year
-                if hasattr(Vehicle, 'brand') and brand:
-                    vehicle.brand = brand  
-                if hasattr(Vehicle, 'model') and model:
-                    vehicle.model = model  
-                if hasattr(Vehicle, 'engine') and engine:
+                if hasattr(Vehicle, "brand") and brand:
+                    vehicle.brand = brand
+                if hasattr(Vehicle, "model") and model:
+                    vehicle.model = model
+                if hasattr(Vehicle, "engine") and engine:
                     vehicle.engine = engine
-                    
                 db.session.add(vehicle)
                 db.session.commit()
             else:
-                # ➕ Aktualizujeme existujúce vozidlo s novými informáciami
                 updated = False
-                if hasattr(Vehicle, 'year') and year and vehicle.year != year:
+                if hasattr(Vehicle, "year") and year and vehicle.year != year:
                     vehicle.year = year
                     updated = True
-                if hasattr(Vehicle, 'brand') and brand and vehicle.brand != brand:
-                    vehicle.brand = brand  
+                if hasattr(Vehicle, "brand") and brand and vehicle.brand != brand:
+                    vehicle.brand = brand
                     updated = True
-                if hasattr(Vehicle, 'model') and model and vehicle.model != model:
-                    vehicle.model = model  
+                if hasattr(Vehicle, "model") and model and vehicle.model != model:
+                    vehicle.model = model
                     updated = True
-                if hasattr(Vehicle, 'engine') and engine and vehicle.engine != engine:
+                if hasattr(Vehicle, "engine") and engine and vehicle.engine != engine:
                     vehicle.engine = engine
                     updated = True
-                    
                 if updated:
                     db.session.commit()
 
@@ -1063,15 +959,13 @@ def receive_can_packet():
             return jsonify({
                 "status": "VIN stored",
                 "vin": vin,
-                "brand":brand,
+                "brand": brand,
                 "year": vehicle.year,
-                "model": vehicle.model, 
+                "model": vehicle.model,
                 "engine": vehicle.engine
             }), 201
 
-        # -----------------------------------
-        # 3️⃣ Pôvodné spracovanie DTC
-        # -----------------------------------
+        # 3) DTC
         if dtc_code:
             dtc_code = dtc_code.strip().upper()
 
@@ -1083,54 +977,31 @@ def receive_can_packet():
             if not vehicle:
                 return jsonify({"error": "Vehicle not found"}), 404
 
-            # ✅ zisti popis z databázy
             meaning = DtcCodeMeaning.query.filter(
                 db.func.lower(DtcCodeMeaning.dtc_code) == dtc_code.lower()
             ).first()
-            
-            description = meaning.dtc_description if meaning else ""
-            
-            # ✅ vypočítaj severity
-            severity = detect_severity_from_description(description)
-            
-            # ✅ HISTORY
-            db.session.add(
-                DTCCodeHistory(
-                    vin_id=vehicle.id,
-                    dtc_code=dtc_code,
-                    severity=severity
-                )
-            )
-            
-            # ✅ ACTIVE
-            DTCCodeActive.query.filter_by(
-                vin_id=vehicle.id,
-                dtc_code=dtc_code
-            ).delete()
-            
-            db.session.add(
-                DTCCodeActive(
-                    vin_id=vehicle.id,
-                    dtc_code=dtc_code,
-                    severity=severity
-                )
-            )
 
-            
+            description = meaning.dtc_description if meaning else ""
+            severity = detect_severity_from_description(description)
+
+            db.session.add(DTCCodeHistory(vin_id=vehicle.id, dtc_code=dtc_code, severity=severity))
+
+            DTCCodeActive.query.filter_by(vin_id=vehicle.id, dtc_code=dtc_code).delete()
+            db.session.add(DTCCodeActive(vin_id=vehicle.id, dtc_code=dtc_code, severity=severity))
+
             db.session.commit()
 
-            return jsonify({
-                "status": "DTC stored",
-                "vin": vehicle.vin,
-                "dtc": dtc_code,
-                "severity": severity
-            }), 201
+            return jsonify({"status": "DTC stored", "vin": vehicle.vin, "dtc": dtc_code, "severity": severity}), 201
+
+        return jsonify({"status": "ignored", "message": "No recognized payload fields"}), 200
 
     except Exception as e:
         db.session.rollback()
         return jsonify({"error": str(e)}), 500
 
-
+# =========================
+# DTC HISTORY (simple)
+# =========================
 @app.route("/api/dtc-history/<vin>", methods=["GET"])
 @jwt_required()
 def get_dtc_history(vin):
@@ -1141,20 +1012,14 @@ def get_dtc_history(vin):
     history = DTCCodeHistory.query.filter_by(vin_id=vehicle.id).order_by(DTCCodeHistory.created_at.desc()).all()
     return jsonify({
         "vin": vin,
-        "dtc_history": [
-            {"dtc_code": d.dtc_code, "created_at": d.created_at.isoformat()} for d in history
-        ]
+        "dtc_history": [{"dtc_code": d.dtc_code, "created_at": d.created_at.isoformat()} for d in history]
     }), 200
 
-
+# =========================
+# DEVICE OFFLINE
+# =========================
 @app.route("/api/device_offline/<int:device_id>", methods=["POST"])
 def device_offline(device_id):
-    """
-    Nastaví zariadenie na OFFLINE stav manuálne.
-    --- 
-    tags:
-      - Device
-    """
     try:
         device = Device.query.get(device_id)
         if not device:
@@ -1162,26 +1027,17 @@ def device_offline(device_id):
 
         device.status = False
         db.session.commit()
-        return jsonify({
-            "status": "success",
-            "device_id": device_id,
-            "message": "Device set to offline"
-        }), 200
+        return jsonify({"status": "success", "device_id": device_id, "message": "Device set to offline"}), 200
 
     except Exception as e:
         db.session.rollback()
         return jsonify({"error": str(e)}), 500
 
-
-
+# =========================
+# VIN decode (apiverve)
+# =========================
 @app.route("/api/vindecode", methods=["POST"])
 def decode_vin_apiverve():
-    """
-    Dekóduje VIN pomocou apiverve VIN Decoder API.
-    ---
-    tags:
-      - VIN Information (apiverve)
-    """
     try:
         payload = request.get_json()
         vin = payload.get("vin")
@@ -1193,11 +1049,8 @@ def decode_vin_apiverve():
         if not api_key:
             return jsonify({"error": "Missing VINDECODER_API_KEY env var on server"}), 500
 
-        # ✅ Apiverve VIN Decoder API používa GET
         url = f"https://api.apiverve.com/v1/vindecoder?vin={vin}"
-        headers = {
-            "X-API-Key": api_key
-        }
+        headers = {"X-API-Key": api_key}
 
         response = requests.get(url, headers=headers, timeout=10)
 
@@ -1209,8 +1062,6 @@ def decode_vin_apiverve():
             }), response.status_code
 
         data = response.json()
-
-        # Väčšina Apiverve API má štruktúru: {"status":"success","data": {...}}
         if "data" in data:
             data = data["data"]
 
@@ -1228,20 +1079,14 @@ def decode_vin_apiverve():
             "bodyStyle": data.get("bodyStyle")
         }
 
-        return jsonify({
-            "status": "success",
-            "source": "apiverve",
-            "data": cleaned
-        }), 200
+        return jsonify({"status": "success", "source": "apiverve", "data": cleaned}), 200
 
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
 # =========================
-# 📡 DEVICE TELEMETRY MODELS
+# GET "last known telemetry" endpoints (ponechane)
 # =========================
-
-
 def _get_latest_telemetry(device_id: int) -> DeviceTelemetry | None:
     return (
         DeviceTelemetry.query
@@ -1250,31 +1095,13 @@ def _get_latest_telemetry(device_id: int) -> DeviceTelemetry | None:
         .first()
     )
 
-
-def _iso(ts: datetime | None) -> str | None:
-    if not ts:
-        return None
-    # UTC-ish ISO without timezone conversion (keď chceš presne Z, ulož UTC a pridaj "Z")
-    return ts.replace(microsecond=0).isoformat() + "Z"
-
-# =========================
-# ✅ LIVE DATA GET ENDPOINTS (LAST KNOWN VALUE)
-# =========================
-
 @app.route("/api/device/<int:device_id>/odometer", methods=["GET"])
 @jwt_required()
 def get_device_odometer(device_id):
     t = _get_latest_telemetry(device_id)
     if not t or t.odometer is None:
         return jsonify({"error": "No odometer data"}), 404
-
-    return jsonify({
-        "status": "success",
-        "device_id": device_id,
-        "odometer": int(t.odometer),
-        "timestamp": _iso(t.created_at)
-    }), 200
-
+    return jsonify({"status": "success", "device_id": device_id, "odometer": int(t.odometer), "timestamp": _iso(t.created_at)}), 200
 
 @app.route("/api/device/<int:device_id>/battery", methods=["GET"])
 @jwt_required()
@@ -1282,7 +1109,6 @@ def get_device_battery(device_id):
     t = _get_latest_telemetry(device_id)
     if not t or t.battery_voltage is None:
         return jsonify({"error": "No battery data"}), 404
-
     return jsonify({
         "status": "success",
         "device_id": device_id,
@@ -1291,17 +1117,12 @@ def get_device_battery(device_id):
         "timestamp": _iso(t.created_at)
     }), 200
 
-
 @app.route("/api/device/<int:device_id>/engine", methods=["GET"])
 @jwt_required()
 def get_device_engine(device_id):
     t = _get_latest_telemetry(device_id)
-    if not t or all(v is None for v in [
-        t.engine_running, t.engine_rpm, t.engine_load,
-        t.coolant_temp, t.oil_temp, t.intake_air_temp
-    ]):
+    if not t or all(v is None for v in [t.engine_running, t.engine_rpm, t.engine_load, t.coolant_temp, t.oil_temp, t.intake_air_temp]):
         return jsonify({"error": "No engine data"}), 404
-
     return jsonify({
         "status": "success",
         "device_id": device_id,
@@ -1316,16 +1137,12 @@ def get_device_engine(device_id):
         "timestamp": _iso(t.created_at)
     }), 200
 
-
 @app.route("/api/device/<int:device_id>/fuel", methods=["GET"])
 @jwt_required()
 def get_device_fuel(device_id):
     t = _get_latest_telemetry(device_id)
-    if not t or all(v is None for v in [
-        t.consumption_lh, t.consumption_l100km, t.maf, t.fuel_type
-    ]):
+    if not t or all(v is None for v in [t.consumption_lh, t.consumption_l100km, t.maf, t.fuel_type]):
         return jsonify({"error": "No fuel data"}), 404
-
     return jsonify({
         "status": "success",
         "device_id": device_id,
@@ -1338,28 +1155,19 @@ def get_device_fuel(device_id):
         "timestamp": _iso(t.created_at)
     }), 200
 
-
 @app.route("/api/device/<int:device_id>/speed", methods=["GET"])
 @jwt_required()
 def get_device_speed(device_id):
     t = _get_latest_telemetry(device_id)
     if not t or t.speed is None:
         return jsonify({"error": "No speed data"}), 404
+    return jsonify({"status": "success", "device_id": device_id, "speed": int(t.speed), "timestamp": _iso(t.created_at)}), 200
 
-    return jsonify({
-        "status": "success",
-        "device_id": device_id,
-        "speed": int(t.speed),
-        "timestamp": _iso(t.created_at)
-    }), 200
-
-
-# VSETKO ZOBRAZ GET
+# =========================
+# SHOW ALL
+# =========================
 @app.route("/api/all", methods=["GET"])
 def show_all():
-    """
-    Zobrazí všetky VIN a priradené DTC kódy (z aktívnych aj historických tabuliek).
-    """
     try:
         vehicles = Vehicle.query.all()
         data = []
@@ -1374,9 +1182,11 @@ def show_all():
         print("❌ SHOW ALL ERROR:", e)
         return jsonify({"error": str(e)}), 500
 
-
-
+# =========================
+# MAIN
+# =========================
 if __name__ == "__main__":
     with app.app_context():
         db.create_all()
-    app.run(host="0.0.0.0", port=int(os.environ.get("PORT", 5000)))
+    # ✅ MUST: socketio.run (nie app.run)
+    socketio.run(app, host="0.0.0.0", port=int(os.environ.get("PORT", 5000)))
