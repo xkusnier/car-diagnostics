@@ -34,7 +34,8 @@ swagger_template = {
 swagger = Swagger(app, template=swagger_template)
 
 
-swagger = Swagger(app, template=swagger_template, config=swagger_config)
+swagger = Swagger(app, template=swagger_template)
+
 
 # ✅ Socket.IO init (WS)
 socketio = SocketIO(app, cors_allowed_origins="*", async_mode="eventlet")
