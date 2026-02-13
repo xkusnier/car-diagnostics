@@ -1205,6 +1205,204 @@ def decode_vin_apiverve():
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
+# =========================
+# 📡 DEVICE TELEMETRY MODELS
+# =========================
+
+class DeviceTelemetry(db.Model):
+    __tablename__ = "device_telemetry"
+
+    id = db.Column(db.Integer, primary_key=True)
+    device_id = db.Column(db.Integer, db.ForeignKey("device.id"), nullable=False, index=True)
+
+    # odometer (km)
+    odometer = db.Column(db.Integer, nullable=True)
+
+    # battery
+    battery_voltage = db.Column(db.Float, nullable=True)
+    battery_health = db.Column(db.String(30), nullable=True)
+
+    # engine
+    engine_running = db.Column(db.Boolean, nullable=True)
+    engine_rpm = db.Column(db.Integer, nullable=True)
+    engine_load = db.Column(db.Float, nullable=True)
+    coolant_temp = db.Column(db.Integer, nullable=True)
+    oil_temp = db.Column(db.Integer, nullable=True)
+    intake_air_temp = db.Column(db.Integer, nullable=True)
+
+    # fuel
+    consumption_lh = db.Column(db.Float, nullable=True)
+    consumption_l100km = db.Column(db.Float, nullable=True)
+    maf = db.Column(db.Float, nullable=True)
+    fuel_type = db.Column(db.String(20), nullable=True)
+
+    # speed (km/h)
+    speed = db.Column(db.Integer, nullable=True)
+
+    created_at = db.Column(db.DateTime, default=datetime.utcnow, index=True)
+
+
+def _get_latest_telemetry(device_id: int) -> DeviceTelemetry | None:
+    return (
+        DeviceTelemetry.query
+        .filter_by(device_id=device_id)
+        .order_by(DeviceTelemetry.created_at.desc())
+        .first()
+    )
+
+
+def _iso(ts: datetime | None) -> str | None:
+    if not ts:
+        return None
+    # UTC-ish ISO without timezone conversion (keď chceš presne Z, ulož UTC a pridaj "Z")
+    return ts.replace(microsecond=0).isoformat() + "Z"
+
+
+# =========================
+# ✅ DEVICE TELEMETRY ENDPOINTS (READ)
+# =========================
+
+@app.route("/api/device/<int:device_id>/odometer", methods=["GET"])
+@jwt_required()
+def get_device_odometer(device_id):
+    telem = _get_latest_telemetry(device_id)
+    if not telem or telem.odometer is None:
+        return jsonify({"error": "No odometer data"}), 404
+
+    return jsonify({
+        "status": "success",
+        "device_id": device_id,
+        "odometer": telem.odometer,
+        "timestamp": _iso(telem.created_at)
+    }), 200
+
+
+@app.route("/api/device/<int:device_id>/battery", methods=["GET"])
+@jwt_required()
+def get_device_battery(device_id):
+    telem = _get_latest_telemetry(device_id)
+    if not telem or telem.battery_voltage is None:
+        return jsonify({"error": "No battery data"}), 404
+
+    return jsonify({
+        "status": "success",
+        "device_id": device_id,
+        "battery_voltage": float(telem.battery_voltage),
+        "health": telem.battery_health or "unknown",
+        "timestamp": _iso(telem.created_at)
+    }), 200
+
+
+@app.route("/api/device/<int:device_id>/engine", methods=["GET"])
+@jwt_required()
+def get_device_engine(device_id):
+    telem = _get_latest_telemetry(device_id)
+    # stačí aby existoval aspoň jeden engine field
+    if not telem or all(v is None for v in [
+        telem.engine_running, telem.engine_rpm, telem.engine_load,
+        telem.coolant_temp, telem.oil_temp, telem.intake_air_temp
+    ]):
+        return jsonify({"error": "No engine data"}), 404
+
+    return jsonify({
+        "status": "success",
+        "device_id": device_id,
+        "engine": {
+            "running": bool(telem.engine_running) if telem.engine_running is not None else None,
+            "rpm": telem.engine_rpm,
+            "load": telem.engine_load,
+            "coolant_temp": telem.coolant_temp,
+            "oil_temp": telem.oil_temp,
+            "intake_air_temp": telem.intake_air_temp
+        },
+        "timestamp": _iso(telem.created_at)
+    }), 200
+
+
+@app.route("/api/device/<int:device_id>/fuel", methods=["GET"])
+@jwt_required()
+def get_device_fuel(device_id):
+    telem = _get_latest_telemetry(device_id)
+    if not telem or all(v is None for v in [
+        telem.consumption_lh, telem.consumption_l100km, telem.maf, telem.fuel_type
+    ]):
+        return jsonify({"error": "No fuel data"}), 404
+
+    return jsonify({
+        "status": "success",
+        "device_id": device_id,
+        "fuel": {
+            "consumption_lh": telem.consumption_lh,
+            "consumption_l100km": telem.consumption_l100km,
+            "maf": telem.maf,
+            "type": telem.fuel_type or "unknown"
+        },
+        "timestamp": _iso(telem.created_at)
+    }), 200
+
+
+@app.route("/api/device/<int:device_id>/speed", methods=["GET"])
+@jwt_required()
+def get_device_speed(device_id):
+    telem = _get_latest_telemetry(device_id)
+    if not telem or telem.speed is None:
+        return jsonify({"error": "No speed data"}), 404
+
+    return jsonify({
+        "status": "success",
+        "device_id": device_id,
+        "speed": telem.speed,
+        "timestamp": _iso(telem.created_at)
+    }), 200
+
+
+# =========================
+# ✅ DEVICE TELEMETRY INGEST (DEVICE -> SERVER)
+# =========================
+# Toto je dôležité, inak nebude mať server čo vracať.
+# RPi to môže posielať napr. každých X sekúnd cez HTTP POST.
+@app.route("/api/device/<int:device_id>/telemetry", methods=["POST"])
+def ingest_telemetry(device_id):
+    """
+    RPi pošle telemetriu naraz v jednom JSONe.
+    """
+    try:
+        payload = request.get_json() or {}
+
+        # voliteľné sekcie
+        engine = payload.get("engine") or {}
+        fuel = payload.get("fuel") or {}
+
+        t = DeviceTelemetry(
+            device_id=device_id,
+            odometer=payload.get("odometer"),
+
+            battery_voltage=payload.get("battery_voltage"),
+            battery_health=payload.get("health"),
+
+            engine_running=engine.get("running"),
+            engine_rpm=engine.get("rpm"),
+            engine_load=engine.get("load"),
+            coolant_temp=engine.get("coolant_temp"),
+            oil_temp=engine.get("oil_temp"),
+            intake_air_temp=engine.get("intake_air_temp"),
+
+            consumption_lh=fuel.get("consumption_lh"),
+            consumption_l100km=fuel.get("consumption_l100km"),
+            maf=fuel.get("maf"),
+            fuel_type=fuel.get("type"),
+
+            speed=payload.get("speed"),
+        )
+
+        db.session.add(t)
+        db.session.commit()
+
+        return jsonify({"status": "success", "device_id": device_id}), 201
+
+    except Exception as e:
+        db.session.rollback()
+        return jsonify({"error": str(e)}), 500
 
 
 # VSETKO ZOBRAZ GET
