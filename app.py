@@ -125,6 +125,38 @@ class DtcPatternLink(db.Model):
     pattern_id = db.Column(db.Integer, db.ForeignKey("dtc_patterns.id"), nullable=False)
     dtc_code = db.Column(db.String(20), nullable=False)
 
+class DeviceTelemetry(db.Model):
+    __tablename__ = "device_telemetry"
+
+    id = db.Column(db.Integer, primary_key=True)
+    device_id = db.Column(db.Integer, db.ForeignKey("device.id"), nullable=False, index=True)
+
+    # odometer (km)
+    odometer = db.Column(db.Integer, nullable=True)
+
+    # battery
+    battery_voltage = db.Column(db.Float, nullable=True)
+    battery_health = db.Column(db.String(30), nullable=True)
+
+    # engine
+    engine_running = db.Column(db.Boolean, nullable=True)
+    engine_rpm = db.Column(db.Integer, nullable=True)
+    engine_load = db.Column(db.Float, nullable=True)
+    coolant_temp = db.Column(db.Integer, nullable=True)
+    oil_temp = db.Column(db.Integer, nullable=True)
+    intake_air_temp = db.Column(db.Integer, nullable=True)
+
+    # fuel
+    consumption_lh = db.Column(db.Float, nullable=True)
+    consumption_l100km = db.Column(db.Float, nullable=True)
+    maf = db.Column(db.Float, nullable=True)
+    fuel_type = db.Column(db.String(20), nullable=True)
+
+    # speed (km/h)
+    speed = db.Column(db.Integer, nullable=True)
+
+    created_at = db.Column(db.DateTime, default=datetime.utcnow, index=True)
+
 
 
 @app.route("/init-db")
@@ -1208,38 +1240,6 @@ def decode_vin_apiverve():
 # =========================
 # 📡 DEVICE TELEMETRY MODELS
 # =========================
-
-class DeviceTelemetry(db.Model):
-    __tablename__ = "device_telemetry"
-
-    id = db.Column(db.Integer, primary_key=True)
-    device_id = db.Column(db.Integer, db.ForeignKey("device.id"), nullable=False, index=True)
-
-    # odometer (km)
-    odometer = db.Column(db.Integer, nullable=True)
-
-    # battery
-    battery_voltage = db.Column(db.Float, nullable=True)
-    battery_health = db.Column(db.String(30), nullable=True)
-
-    # engine
-    engine_running = db.Column(db.Boolean, nullable=True)
-    engine_rpm = db.Column(db.Integer, nullable=True)
-    engine_load = db.Column(db.Float, nullable=True)
-    coolant_temp = db.Column(db.Integer, nullable=True)
-    oil_temp = db.Column(db.Integer, nullable=True)
-    intake_air_temp = db.Column(db.Integer, nullable=True)
-
-    # fuel
-    consumption_lh = db.Column(db.Float, nullable=True)
-    consumption_l100km = db.Column(db.Float, nullable=True)
-    maf = db.Column(db.Float, nullable=True)
-    fuel_type = db.Column(db.String(20), nullable=True)
-
-    # speed (km/h)
-    speed = db.Column(db.Integer, nullable=True)
-
-    created_at = db.Column(db.DateTime, default=datetime.utcnow, index=True)
 
 
 def _get_latest_telemetry(device_id: int) -> DeviceTelemetry | None:
