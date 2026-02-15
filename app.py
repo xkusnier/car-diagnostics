@@ -61,8 +61,8 @@ app.config['SWAGGER'] = {
     'title': 'Inteligentná diagnostika API',
     'uiversion': 3,
     'openapi': '3.0.2',
-    'consumes': ['application/json'],  # 🔥 globálne nastavenie
-    'produces': ['application/json'],  # 🔥 globálne nastavenie
+    'try_it_out': False,  # 🔥 TOTO PRIDAJ
+    'doc_expansion': 'list',
     'description': '''
         API pre bakalársku prácu - diagnostika vozidiel
         
