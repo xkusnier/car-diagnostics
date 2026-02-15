@@ -116,7 +116,8 @@ app.config['SWAGGER'] = {
 }
 
 swagger = Swagger(app, template=app.config['SWAGGER'])
-
+swagger.config['try_it_out'] = False
+swagger.config['supportedSubmitMethods'] = ['get']  # povolí len GET (alebo [] pre žiadne)
 # ✅ NEW: Socket.IO init (WS)
 socketio = SocketIO(
     app,
