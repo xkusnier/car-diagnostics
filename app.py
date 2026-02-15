@@ -22,7 +22,28 @@ app.config['SWAGGER'] = {
     'title': 'Inteligentná diagnostika API',
     'uiversion': 3,
     'openapi': '3.0.2',
-    'description': 'API pre bakalársku prácu - diagnostika vozidiel',
+    'description': '''
+        API pre bakalársku prácu - diagnostika vozidiel
+        
+        ## Testovanie cez Postman
+        
+        Všetky endpointy je možné testovať v Postmane podľa nasledujúcich príkladov:
+        
+        ### 🔐 Autentifikácia
+        1. Zaregistruj sa: `POST /api/register`
+        2. Prihlás sa: `POST /api/login` → získaš JWT token
+        3. Pre autorizované endpointy pridaj header: `Authorization: Bearer <token>`
+        
+        ### 📱 Zariadenia
+        - Pridanie zariadenia: `POST /api/add-device` s JSON body `{"device_id": 12345}`
+        - Zoznam mojich zariadení: `GET /api/my-devices`
+        - Diagnostika: `GET /api/device/12345/diagnostics`
+        
+        ### 🔄 Komunikácia s RPi
+        - Heartbeat: `POST /api/heartbeat` s JSON `{"device_id": 12345}`
+        - Trigger príkazu: `POST /api/trigger` s JSON `{"device_id": 12345, "command": "GET_VIN"}`
+        - CAN packet: `POST /api/can` s JSON `{"device_id": 12345, "vin": "1HGCM82633A123456"}`
+    ''',
     'version': '1.0.0',
     'termsOfService': '',
     'contact': {
@@ -196,6 +217,14 @@ def init_db():
     ---
     tags:
       - System
+    description: |
+      Vytvorí všetky tabuľky v databáze podľa definovaných modelov.
+      
+      **Testovanie cez Postman:**
+      - Metóda: `GET`
+      - URL: `http://localhost:5000/init-db`
+      - Headers: žiadne
+      - Body: žiadne
     responses:
       200:
         description: Databáza úspešne vytvorená
@@ -216,6 +245,22 @@ def home():
     ---
     tags:
       - System
+    description: |
+      Overenie, či server beží.
+      
+      **Testovanie cez Postman:**
+      - Metóda: `GET`
+      - URL: `http://localhost:5000/`
+      - Headers: žiadne
+      - Body: žiadne
+      
+      **Očakávaná odpoveď:**
+      ```json
+      {
+        "status": "ok",
+        "message": "Flask bezi"
+      }
+      ```
     responses:
       200:
         description: Server beží
@@ -373,6 +418,27 @@ def device_connect_syn():
     ---
     tags:
       - Device Communication
+    description: |
+      Prvý krok trojcestného handshaku pri pripájaní zariadenia.
+      
+      **Testovanie cez Postman:**
+      - Metóda: `POST`
+      - URL: `http://localhost:5000/api/connect`
+      - Headers: `Content-Type: application/json`
+      - Body (raw JSON):
+        ```json
+        {
+          "device_id": 12345
+        }
+        ```
+      
+      **Očakávaná odpoveď:**
+      ```json
+      {
+        "handshake": "SYN-ACK",
+        "device_id": 12345
+      }
+      ```
     parameters:
       - in: body
         name: body
@@ -426,6 +492,28 @@ def device_connect_ack():
     ---
     tags:
       - Device Communication
+    description: |
+      Druhý krok trojcestného handshaku - potvrdenie pripojenia.
+      
+      **Testovanie cez Postman:**
+      - Metóda: `POST`
+      - URL: `http://localhost:5000/api/connect/ack`
+      - Headers: `Content-Type: application/json`
+      - Body (raw JSON):
+        ```json
+        {
+          "device_id": 12345
+        }
+        ```
+      
+      **Očakávaná odpoveď:**
+      ```json
+      {
+        "status": "online",
+        "device_id": 12345,
+        "handshake": "ACK-complete"
+      }
+      ```
     parameters:
       - in: body
         name: body
@@ -532,6 +620,24 @@ def clear_device_dtcs(device_id):
       - DTC
     security:
       - bearerAuth: []
+    description: |
+      Odošle príkaz na vymazanie DTC kódov pre konkrétne zariadenie.
+      
+      **Testovanie cez Postman:**
+      - Metóda: `POST`
+      - URL: `http://localhost:5000/api/device/12345/clear-dtcs`
+      - Headers: 
+        - `Content-Type: application/json`
+        - `Authorization: Bearer <token>`
+      - Body: žiadne
+      
+      **Očakávaná odpoveď:**
+      ```json
+      {
+        "status": "waiting",
+        "message": "Clear command sent to device. Waiting for RPi confirmation."
+      }
+      ```
     parameters:
       - in: path
         name: device_id
@@ -591,6 +697,26 @@ def read_device_dtcs(device_id):
       - DTC
     security:
       - bearerAuth: []
+    description: |
+      Odošle príkaz na načítanie aktuálnych DTC kódov.
+      
+      **Testovanie cez Postman:**
+      - Metóda: `POST`
+      - URL: `http://localhost:5000/api/device/12345/read-dtcs`
+      - Headers: 
+        - `Content-Type: application/json`
+        - `Authorization: Bearer <token>`
+      - Body: žiadne
+      
+      **Očakávaná odpoveď:**
+      ```json
+      {
+        "status": "success",
+        "message": "Read DTC command sent to device",
+        "device_id": 12345,
+        "command": "GET_DTCS_PERM"
+      }
+      ```
     parameters:
       - in: path
         name: device_id
@@ -731,6 +857,39 @@ def add_device():
       - Devices
     security:
       - bearerAuth: []
+    description: |
+      Pridá nové diagnostické zariadenie a priradí ho používateľovi.
+      
+      **Testovanie cez Postman:**
+      - Metóda: `POST`
+      - URL: `http://localhost:5000/api/add-device`
+      - Headers: 
+        - `Content-Type: application/json`
+        - `Authorization: Bearer <token>`
+      - Body (raw JSON):
+        ```json
+        {
+          "device_id": 12345
+        }
+        ```
+      
+      Pre admina je možné priradiť zariadenie inému používateľovi:
+      ```json
+      {
+        "device_id": 12345,
+        "user_id": 2
+      }
+      ```
+      
+      **Očakávaná odpoveď:**
+      ```json
+      {
+        "status": "success",
+        "device_id": 12345,
+        "assigned_to": 1,
+        "message": "Device 12345 assigned to user 1"
+      }
+      ```
     parameters:
       - in: body
         name: body
@@ -823,6 +982,37 @@ def device_diagnostics(device_id):
       - Devices
     security:
       - bearerAuth: []
+    description: |
+      Vráti kompletné diagnostické informácie pre zariadenie vrátane VIN a DTC kódov.
+      
+      **Testovanie cez Postman:**
+      - Metóda: `GET`
+      - URL: `http://localhost:5000/api/device/12345/diagnostics`
+      - Headers: 
+        - `Authorization: Bearer <token>`
+      - Body: žiadne
+      
+      **Očakávaná odpoveď:**
+      ```json
+      {
+        "status": "success",
+        "device_id": 12345,
+        "vin": "1HGCM82633A123456",
+        "brand": "Honda",
+        "year": "2021",
+        "model": "Accord",
+        "engine": "2.0L",
+        "dtc_codes": [
+          {
+            "dtc_code": "P0300",
+            "description": "Random/Multiple Cylinder Misfire Detected",
+            "severity": "critical",
+            "created_at": "2025-02-15T10:30:00"
+          }
+        ],
+        "online": true
+      }
+      ```
     parameters:
       - in: path
         name: device_id
@@ -933,6 +1123,30 @@ def my_devices():
       - Devices
     security:
       - bearerAuth: []
+    description: |
+      Vráti zoznam všetkých zariadení patriacich prihlásenému používateľovi.
+      
+      **Testovanie cez Postman:**
+      - Metóda: `GET`
+      - URL: `http://localhost:5000/api/my-devices`
+      - Headers: 
+        - `Authorization: Bearer <token>`
+      - Body: žiadne
+      
+      **Očakávaná odpoveď:**
+      ```json
+      {
+        "status": "success",
+        "devices": [
+          {
+            "device_id": 12345,
+            "vin": "1HGCM82633A123456",
+            "status": "Online",
+            "user_id": 1
+          }
+        ]
+      }
+      ```
     responses:
       200:
         description: Zoznam zariadení
@@ -1001,6 +1215,31 @@ def login():
     ---
     tags:
       - Authentication
+    description: |
+      Prihlási používateľa a vráti JWT token.
+      
+      **Testovanie cez Postman:**
+      - Metóda: `POST`
+      - URL: `http://localhost:5000/api/login`
+      - Headers: `Content-Type: application/json`
+      - Body (raw JSON):
+        ```json
+        {
+          "email": "user@example.com",
+          "password": "heslo123"
+        }
+        ```
+      
+      **Očakávaná odpoveď:**
+      ```json
+      {
+        "status": "success",
+        "access_token": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...",
+        "role": "user"
+      }
+      ```
+      
+      Token potom použiješ v ďalších requestoch ako Bearer token.
     parameters:
       - in: body
         name: body
@@ -1063,6 +1302,28 @@ def register():
     ---
     tags:
       - Authentication
+    description: |
+      Zaregistruje nového používateľa.
+      
+      **Testovanie cez Postman:**
+      - Metóda: `POST`
+      - URL: `http://localhost:5000/api/register`
+      - Headers: `Content-Type: application/json`
+      - Body (raw JSON):
+        ```json
+        {
+          "email": "user@example.com",
+          "password": "heslo123"
+        }
+        ```
+      
+      **Očakávaná odpoveď:**
+      ```json
+      {
+        "status": "success",
+        "message": "User registered"
+      }
+      ```
     parameters:
       - in: body
         name: body
@@ -1195,6 +1456,34 @@ def heartbeat():
     ---
     tags:
       - Device Communication
+    description: |
+      Endpoint pre pravidelné heartbeat requesty z RPi.
+      Udržuje zariadenie online a vracia čakajúce príkazy.
+      
+      **Testovanie cez Postman:**
+      - Metóda: `POST`
+      - URL: `http://localhost:5000/api/heartbeat`
+      - Headers: `Content-Type: application/json`
+      - Body (raw JSON):
+        ```json
+        {
+          "device_id": 12345
+        }
+        ```
+      
+      **Očakávaná odpoveď (žiadny príkaz):**
+      ```json
+      {
+        "status": "ok"
+      }
+      ```
+      
+      **Očakávaná odpoveď (s príkazom):**
+      ```json
+      {
+        "command": "GET_VIN"
+      }
+      ```
     parameters:
       - in: body
         name: body
@@ -1253,6 +1542,37 @@ def trigger_command():
     ---
     tags:
       - Device Communication
+    description: |
+      Odošle príkaz do fronty pre konkrétne zariadenie.
+      Zariadenie si ho vyzdvihne pri najbližšom heartbeat.
+      
+      **Testovanie cez Postman:**
+      - Metóda: `POST`
+      - URL: `http://localhost:5000/api/trigger`
+      - Headers: `Content-Type: application/json`
+      - Body (raw JSON):
+        ```json
+        {
+          "device_id": 12345,
+          "command": "GET_VIN"
+        }
+        ```
+      
+      **Dostupné príkazy:**
+      - `GET_VIN` - načítanie VIN čísla
+      - `GET_DTCS_PERM` - načítanie aktívnych DTC kódov
+      - `GET_DTCS_PEND` - načítanie pending DTC kódov
+      - `GET_RPM` - načítanie otáčok motora
+      - `GET_TEMP` - načítanie teploty
+      - `CLEAR_DTCS` - vymazanie DTC kódov
+      
+      **Očakávaná odpoveď:**
+      ```json
+      {
+        "status": "queued",
+        "command": "GET_VIN"
+      }
+      ```
     parameters:
       - in: body
         name: body
@@ -1319,6 +1639,68 @@ def receive_can_packet():
     ---
     tags:
       - Device Communication
+    description: |
+      Hlavný endpoint pre príjem dát z RPi zariadenia.
+      
+      **Typy správ:**
+      
+      **1. Odoslanie VIN:**
+      ```json
+      {
+        "device_id": 12345,
+        "vin": "1HGCM82633A123456",
+        "year": "2021",
+        "brand": "Honda",
+        "model": "Accord",
+        "engine": "2.0L"
+      }
+      ```
+      
+      **2. Odoslanie DTC kódu:**
+      ```json
+      {
+        "device_id": 12345,
+        "dtc_code": "P0300"
+      }
+      ```
+      
+      **3. Potvrdenie vymazania DTC:**
+      ```json
+      {
+        "device_id": 12345,
+        "clear_status": "ok"
+      }
+      ```
+      
+      **4. Odoslanie telemetrie:**
+      ```json
+      {
+        "device_id": 12345,
+        "odometer": 123456,
+        "speed": 80,
+        "battery": {
+          "battery_voltage": 12.6,
+          "health": "good"
+        },
+        "engine": {
+          "running": true,
+          "rpm": 2500,
+          "load": 45.5,
+          "coolant_temp": 90
+        },
+        "fuel": {
+          "consumption_lh": 2.5,
+          "consumption_l100km": 8.2,
+          "type": "gasoline"
+        }
+      }
+      ```
+      
+      **Očakávané odpovede:**
+      - Pre VIN: `{"status": "VIN stored", "vin": "1HGCM82633A123456", ...}`
+      - Pre DTC: `{"status": "DTC stored", "vin": "...", "dtc": "P0300", "severity": "critical"}`
+      - Pre clear: `{"status": "DTC cleared", "vin_id": 1}`
+      - Pre telemetriu: `{"status": "telemetry stored", "device_id": 12345, "timestamp": "2025-02-15T10:30:00Z"}`
     parameters:
       - in: body
         name: body
