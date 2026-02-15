@@ -61,7 +61,6 @@ app.config['SWAGGER'] = {
     'title': 'Inteligentná diagnostika API',
     'uiversion': 3,
     'openapi': '3.0.2',
-    'try_it_out': False,  # 🔥 TOTO PRIDAJ
     'doc_expansion': 'list',
     'description': '''
         API pre bakalársku prácu - diagnostika vozidiel
@@ -116,8 +115,10 @@ app.config['SWAGGER'] = {
 }
 
 swagger = Swagger(app, template=app.config['SWAGGER'])
-swagger.config['try_it_out'] = False
-swagger.config['supportedSubmitMethods'] = ['get']  # povolí len GET (alebo [] pre žiadne)
+app.config['SWAGGER_UI_DOC_EXPANSION'] = 'list'
+app.config['SWAGGER_UI_OPERATION_ID'] = True
+app.config['SWAGGER_UI_REQUEST_DURATION'] = True
+app.config['SWAGGER_UI_TRY_IT_OUT'] = False  # 🔥 TOTO JE TO NAJDÔLEŽITEJŠIE!
 # ✅ NEW: Socket.IO init (WS)
 socketio = SocketIO(
     app,
