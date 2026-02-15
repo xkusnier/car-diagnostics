@@ -1293,16 +1293,17 @@ def login():
     parameters:
       - in: body
         name: body
+        description: Prihlasovacie údaje
         required: true
         schema:
           type: object
           properties:
             email:
               type: string
-              example: "user@example.com"
+              example: "admin@admin.com"
             password:
               type: string
-              example: "heslo123"
+              example: "admin"
     responses:
       200:
         description: Úspešné prihlásenie
@@ -1320,8 +1321,8 @@ def login():
         description: Chýbajúce údaje
       401:
         description: Nesprávne prihlasovacie údaje
-      500:
-        description: Server error
+      415:
+        description: Content-Type must be application/json
     """
     try:
         data = request.get_json()
