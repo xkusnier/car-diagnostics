@@ -1232,6 +1232,11 @@ def login():
     ---
     tags:
       - Authentication
+    consumes:
+      - application/json
+    produces:
+      - application/json
+      
     description: |
       Prihlási používateľa a vráti JWT token.
       
