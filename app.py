@@ -22,7 +22,19 @@ CORS(app, origins=[
     "http://localhost:3000"  # ak používaš React lokálne
 ])
 
+@app.before_request
+def handle_preflight():
+    if request.method == "OPTIONS":
+        response = jsonify({"status": "ok"})
+        response.headers.add("Access-Control-Allow-Origin", "*")
+        response.headers.add("Access-Control-Allow-Headers", "Content-Type,Authorization")
+        response.headers.add("Access-Control-Allow-Methods", "GET,PUT,POST,DELETE,OPTIONS")
+        return response
 
+@app.before_request
+def ensure_json_content_type():
+    if request.method == "POST" and not request.is_json:
+        return jsonify({"error": "Content-Type must be application/json"}), 415
 @app.after_request
 def after_request(response):
     response.headers.add('Access-Control-Allow-Origin', '*')
