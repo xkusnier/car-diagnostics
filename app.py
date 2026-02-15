@@ -21,20 +21,34 @@ CORS(app, origins=[
     "http://localhost:5000",
     "http://localhost:3000"  # ak používaš React lokálne
 ])
-
-@app.before_request
-def handle_preflight():
-    if request.method == "OPTIONS":
-        response = jsonify({"status": "ok"})
-        response.headers.add("Access-Control-Allow-Origin", "*")
-        response.headers.add("Access-Control-Allow-Headers", "Content-Type,Authorization")
-        response.headers.add("Access-Control-Allow-Methods", "GET,PUT,POST,DELETE,OPTIONS")
-        return response
-
 @app.before_request
 def ensure_json_content_type():
-    if request.method == "POST" and not request.is_json:
-        return jsonify({"error": "Content-Type must be application/json"}), 415
+    # Pre POST, PUT, PATCH endpointy vyžaduj JSON
+    if request.method in ['POST', 'PUT', 'PATCH']:
+        # Ak je to OPTIONS request, preskoč (pre CORS)
+        if request.method == 'OPTIONS':
+            return
+            
+        # Ak request nemá Content-Type: application/json
+        if not request.is_json:
+            return jsonify({
+                "error": "Content-Type must be application/json",
+                "detail": "Please set Content-Type header to 'application/json'"
+            }), 415
+
+from flask import make_response
+
+
+@app.before_request
+def log_request_info():
+    print(f"Request: {request.method} {request.path}")
+    print(f"Headers: {dict(request.headers)}")
+    if request.is_json:
+        print(f"JSON: {request.get_json()}")
+
+
+
+
 @app.after_request
 def after_request(response):
     response.headers.add('Access-Control-Allow-Origin', '*')
@@ -1261,8 +1275,8 @@ def login():
       - Body (raw JSON):
         ```json
         {
-          "email": "user@example.com",
-          "password": "heslo123"
+          "email": "admin@admin.com",
+          "password": "admin"
         }
         ```
       
