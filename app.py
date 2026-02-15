@@ -269,7 +269,7 @@ def init_db():
       
       **Testovanie cez Postman:**
       - Metóda: `GET`
-      - URL: `http://localhost:5000/init-db`
+      - URL: `http://car-diagnostics.onrender.com/init-db`
       - Headers: žiadne
       - Body: žiadne
     responses:
@@ -297,7 +297,7 @@ def home():
       
       **Testovanie cez Postman:**
       - Metóda: `GET`
-      - URL: `http://localhost:5000/`
+      - URL: `http://car-diagnostics.onrender.com/`
       - Headers: žiadne
       - Body: žiadne
       
@@ -470,7 +470,7 @@ def device_connect_syn():
       
       **Testovanie cez Postman:**
       - Metóda: `POST`
-      - URL: `http://localhost:5000/api/connect`
+      - URL: `http://car-diagnostics.onrender.com/api/connect`
       - Headers: `Content-Type: application/json`
       - Body (raw JSON):
         ```json
@@ -544,7 +544,7 @@ def device_connect_ack():
       
       **Testovanie cez Postman:**
       - Metóda: `POST`
-      - URL: `http://localhost:5000/api/connect/ack`
+      - URL: `http://car-diagnostics.onrender.com/api/connect/ack`
       - Headers: `Content-Type: application/json`
       - Body (raw JSON):
         ```json
@@ -672,7 +672,7 @@ def clear_device_dtcs(device_id):
       
       **Testovanie cez Postman:**
       - Metóda: `POST`
-      - URL: `http://localhost:5000/api/device/12345/clear-dtcs`
+      - URL: `http://car-diagnostics.onrender.com/api/device/12345/clear-dtcs`
       - Headers: 
         - `Content-Type: application/json`
         - `Authorization: Bearer <token>`
@@ -749,7 +749,7 @@ def read_device_dtcs(device_id):
       
       **Testovanie cez Postman:**
       - Metóda: `POST`
-      - URL: `http://localhost:5000/api/device/12345/read-dtcs`
+      - URL: `http://car-diagnostics.onrender.com/api/device/12345/read-dtcs`
       - Headers: 
         - `Content-Type: application/json`
         - `Authorization: Bearer <token>`
@@ -909,7 +909,7 @@ def add_device():
       
       **Testovanie cez Postman:**
       - Metóda: `POST`
-      - URL: `http://localhost:5000/api/add-device`
+      - URL: `http://car-diagnostics.onrender.com/api/add-device`
       - Headers: 
         - `Content-Type: application/json`
         - `Authorization: Bearer <token>`
@@ -1034,7 +1034,7 @@ def device_diagnostics(device_id):
       
       **Testovanie cez Postman:**
       - Metóda: `GET`
-      - URL: `http://localhost:5000/api/device/12345/diagnostics`
+      - URL: `http://car-diagnostics.onrender.com/api/device/12345/diagnostics`
       - Headers: 
         - `Authorization: Bearer <token>`
       - Body: žiadne
@@ -1175,7 +1175,7 @@ def my_devices():
       
       **Testovanie cez Postman:**
       - Metóda: `GET`
-      - URL: `http://localhost:5000/api/my-devices`
+      - URL: `http://car-diagnostics.onrender.com/api/my-devices`
       - Headers: 
         - `Authorization: Bearer <token>`
       - Body: žiadne
@@ -1272,7 +1272,7 @@ def login():
       
       **Testovanie cez Postman:**
       - Metóda: `POST`
-      - URL: `http://localhost:5000/api/login`
+      - URL: `http://car-diagnostics.onrender.com/api/login`
       - Headers: `Content-Type: application/json`
       - Body (raw JSON):
         ```json
@@ -1360,7 +1360,7 @@ def register():
       
       **Testovanie cez Postman:**
       - Metóda: `POST`
-      - URL: `http://localhost:5000/api/register`
+      - URL: `http://car-diagnostics.onrender.com/api/register`
       - Headers: `Content-Type: application/json`
       - Body (raw JSON):
         ```json
@@ -1515,7 +1515,7 @@ def heartbeat():
       
       **Testovanie cez Postman:**
       - Metóda: `POST`
-      - URL: `http://localhost:5000/api/heartbeat`
+      - URL: `http://car-diagnostics.onrender.com/api/heartbeat`
       - Headers: `Content-Type: application/json`
       - Body (raw JSON):
         ```json
@@ -1601,7 +1601,7 @@ def trigger_command():
       
       **Testovanie cez Postman:**
       - Metóda: `POST`
-      - URL: `http://localhost:5000/api/trigger`
+      - URL: `http://car-diagnostics.onrender.com/api/trigger`
       - Headers: `Content-Type: application/json`
       - Body (raw JSON):
         ```json
