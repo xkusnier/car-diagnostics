@@ -62,7 +62,7 @@ app.config['SWAGGER'] = {
     },
     'servers': [
         {
-            'url': 'https://tvoja-app.onrender.com',  # 🔥 tvoja Render URL
+            'url': 'https://car-diagnostics-frontend.onrender.com',  # 🔥 tvoja Render URL
             'description': 'Render server'
         },
         {
