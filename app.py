@@ -55,7 +55,7 @@ app.config['SWAGGER'] = {
     },
     'servers': [
         {
-            'url': 'http://localhost:5000',
+            'url': 'https://car-diagnostics-frontend.onrender.com',
             'description': 'Local development server'
         }
     ],
