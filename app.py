@@ -15,7 +15,14 @@ import eventlet
 eventlet.monkey_patch()
 
 app = Flask(__name__)
-CORS(app)  # klasické CORS pre REST
+CORS(app, origins=["https://car-diagnostics-frontend.onrender.com", "http://localhost:5000"])  # klasické CORS pre REST
+
+@app.after_request
+def after_request(response):
+    response.headers.add('Access-Control-Allow-Origin', '*')
+    response.headers.add('Access-Control-Allow-Headers', 'Content-Type,Authorization')
+    response.headers.add('Access-Control-Allow-Methods', 'GET,PUT,POST,DELETE,OPTIONS')
+    return response
 
 # ✅ Swagger konfigurácia
 app.config['SWAGGER'] = {
@@ -55,8 +62,12 @@ app.config['SWAGGER'] = {
     },
     'servers': [
         {
-            'url': 'https://car-diagnostics-frontend.onrender.com',
-            'description': 'Local development server'
+            'url': 'https://tvoja-app.onrender.com',  # 🔥 tvoja Render URL
+            'description': 'Render server'
+        },
+        {
+            'url': 'http://localhost:5000',  
+            'description': 'Local development'
         }
     ],
     'components': {
