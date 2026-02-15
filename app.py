@@ -15,7 +15,13 @@ import eventlet
 eventlet.monkey_patch()
 
 app = Flask(__name__)
-CORS(app, origins=["https://car-diagnostics-frontend.onrender.com", "http://localhost:5000"])  # klasické CORS pre REST
+CORS(app, origins=[
+    "https://car-diagnostics-frontend.onrender.com",  # frontend
+    "https://car-diagnostics.onrender.com",           # backend (pre Swagger)
+    "http://localhost:5000",
+    "http://localhost:3000"  # ak používaš React lokálne
+])
+
 
 @app.after_request
 def after_request(response):
