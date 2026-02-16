@@ -1832,6 +1832,13 @@ def receive_can_packet():
       500:
         description: Server error
     """
+    payload = request.get_json(silent=True)
+    return jsonify({
+        "debug": True,
+        "content_type": request.content_type,
+        "is_json": request.is_json,
+        "raw_json": payload
+    }), 200
     try:
         payload = request.get_json()
         device_id = payload.get("device_id")
