@@ -221,6 +221,7 @@ class DtcPattern(db.Model):
     name = db.Column(db.String(120), nullable=False)
     primary_cause = db.Column(db.String(255), nullable=False)
     confidence = db.Column(db.Integer, default=80)
+    source_url = db.Column(db.Text, nullable=True)  # 🔥 NOVÉ
 
 class DtcPatternLink(db.Model):
     __tablename__ = "dtc_pattern_links"
