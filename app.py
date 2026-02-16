@@ -228,6 +228,33 @@ class DtcPatternLink(db.Model):
     pattern_id = db.Column(db.Integer, db.ForeignKey("dtc_patterns.id"), nullable=False)
     dtc_code = db.Column(db.String(20), nullable=False)
 
+class VehicleTelemetry(db.Model):  # 🔥 Zmena názvu
+    __tablename__ = "vehicle_telemetry"  # 🔥 Nový názov tabuľky
+    id = db.Column(db.Integer, primary_key=True)
+    vehicle_id = db.Column(db.Integer, db.ForeignKey("vehicles.id"), nullable=False, index=True)  # 🔥 Zmena z device_id
+    vehicle = db.relationship("Vehicle", backref=db.backref("telemetry", lazy="dynamic"))  # 🔥 Vzťah
+
+    odometer = db.Column(db.Integer, nullable=True)
+
+    battery_voltage = db.Column(db.Float, nullable=True)
+    battery_health = db.Column(db.String(30), nullable=True)
+
+    engine_running = db.Column(db.Boolean, nullable=True)
+    engine_rpm = db.Column(db.Integer, nullable=True)
+    engine_load = db.Column(db.Float, nullable=True)
+    coolant_temp = db.Column(db.Integer, nullable=True)
+    oil_temp = db.Column(db.Integer, nullable=True)
+    intake_air_temp = db.Column(db.Integer, nullable=True)
+
+    consumption_lh = db.Column(db.Float, nullable=True)
+    consumption_l100km = db.Column(db.Float, nullable=True)
+    maf = db.Column(db.Float, nullable=True)
+    fuel_type = db.Column(db.String(20), nullable=True)
+
+    speed = db.Column(db.Integer, nullable=True)
+
+    created_at = db.Column(db.DateTime, default=datetime.utcnow, index=True)
+
 class DeviceTelemetry(db.Model):
     __tablename__ = "device_telemetry"
     id = db.Column(db.Integer, primary_key=True)
@@ -371,14 +398,22 @@ def _telemetry_payload(device_id: int, payload: dict) -> dict:
     }
 
 def _save_telemetry_to_db(device_id: int, t: dict) -> None:
-    # DB je voliteľné, ale už to máš v projekte -> ulož
+    """Uloží telemetriu do DB - nájde vehicle_id cez DeviceVehicle"""
     try:
+        # 🔥 Získať vehicle_id z DeviceVehicle
+        device_vehicle = DeviceVehicle.query.filter_by(device_id=device_id).first()
+        if not device_vehicle or not device_vehicle.last_vin_id:
+            print(f"❌ No vehicle associated with device {device_id}")
+            return
+
+        vehicle_id = device_vehicle.last_vin_id
+        
         battery = t.get("battery") or {}
         engine = t.get("engine") or {}
         fuel = t.get("fuel") or {}
 
-        row = DeviceTelemetry(
-            device_id=device_id,
+        row = VehicleTelemetry(  # 🔥 Použi nový model
+            vehicle_id=vehicle_id,  # 🔥 Ukladáme vehicle_id, nie device_id
             odometer=t.get("odometer"),
             battery_voltage=battery.get("battery_voltage"),
             battery_health=battery.get("health"),
@@ -397,9 +432,11 @@ def _save_telemetry_to_db(device_id: int, t: dict) -> None:
         )
         db.session.add(row)
         db.session.commit()
-    except Exception:
+        print(f"✅ Telemetry saved for vehicle_id: {vehicle_id}")
+        
+    except Exception as e:
         db.session.rollback()
-
+        print(f"❌ Error saving telemetry: {e}")
 # =========================
 # ✅ NEW: SOCKET.IO EVENTS
 # =========================
@@ -1818,16 +1855,29 @@ def receive_can_packet():
         # ✅ NEW: TELEMETRY via REST
         # RPi môže poslať telemetry v tom istom /api/can payload-e:
         # odometer, battery{..}, engine{..}, fuel{..}, speed
+        # V receive_can_packet funkcii, v telemetry časti:
         if any(k in payload for k in ["odometer", "battery", "engine", "fuel", "speed"]):
+            # 🔥 Skontroluj či máme VIN
+            state = DeviceVehicle.query.filter_by(device_id=device_id).first()
+            if not state or not state.last_vin_id:
+                return jsonify({
+                    "error": "No VIN associated with this device",
+                    "message": "Please send VIN first"
+                }), 400
+                
             t = _telemetry_payload(int(device_id), payload)
             device.status = True
             db.session.commit()
-
-            _save_telemetry_to_db(int(device_id), t)
+        
+            _save_telemetry_to_db(int(device_id), t)  # Tvoja upravená funkcia
             socketio.emit("telemetry_update", t, room=f"device:{int(device_id)}")
-
-            return jsonify({"status": "telemetry stored", "device_id": int(device_id), "timestamp": t["timestamp"]}), 201
-
+        
+            return jsonify({
+                "status": "telemetry stored", 
+                "device_id": int(device_id),
+                "vehicle_id": state.last_vin_id,  # 🔥 Pridaj vehicle_id do odpovede
+                "timestamp": t["timestamp"]
+            }), 201
         # 1) CLEAR_DTCS confirmation
         if clear_status is not None:
             state = DeviceVehicle.query.filter_by(device_id=device_id).first()
@@ -2019,45 +2069,98 @@ def decode_vin_apiverve():
 # =========================
 # GET "last known telemetry" endpoints (ponechane)
 # =========================
-def _get_latest_telemetry(device_id: int) -> DeviceTelemetry | None:
+def _get_vehicle_id_from_device(device_id: int) -> int | None:
+    """Pomocná funkcia na získanie vehicle_id z device_id"""
+    device_vehicle = DeviceVehicle.query.filter_by(device_id=device_id).first()
+    if device_vehicle and device_vehicle.last_vin_id:
+        return device_vehicle.last_vin_id
+    return None
+
+def _get_latest_telemetry(device_id: int) -> VehicleTelemetry | None:  # 🔥 Zmena návratového typu
+    """Získa najnovšiu telemetriu pre zariadenie (cez vehicle_id)"""
+    vehicle_id = _get_vehicle_id_from_device(device_id)
+    if not vehicle_id:
+        return None
+    
     return (
-        DeviceTelemetry.query
-        .filter_by(device_id=device_id)
-        .order_by(DeviceTelemetry.created_at.desc())
+        VehicleTelemetry.query  # 🔥 Použi nový model
+        .filter_by(vehicle_id=vehicle_id)
+        .order_by(VehicleTelemetry.created_at.desc())
         .first()
     )
 
 @app.route("/api/device/<int:device_id>/odometer", methods=["GET"])
 @jwt_required()
 def get_device_odometer(device_id):
+    """
+    Získanie posledného známeho stavu odometra
+    """
+    # Skontroluj vlastníctvo zariadenia
+    user_id = int(get_jwt_identity())
+    user = User.query.get(user_id)
+    
+    if user.role != "admin":
+        device = Device.query.filter_by(id=device_id, user_id=user_id).first()
+        if not device:
+            return jsonify({"error": "Device not found or not owned by user"}), 404
+    
     t = _get_latest_telemetry(device_id)
     if not t or t.odometer is None:
         return jsonify({"error": "No odometer data"}), 404
-    return jsonify({"status": "success", "device_id": device_id, "odometer": int(t.odometer), "timestamp": _iso(t.created_at)}), 200
-
+    
+    return jsonify({
+        "status": "success", 
+        "device_id": device_id,
+        "vehicle_id": t.vehicle_id,  # 🔥 Pridaj vehicle_id do odpovede
+        "odometer": int(t.odometer), 
+        "timestamp": _iso(t.created_at)
+    }), 200
 @app.route("/api/device/<int:device_id>/battery", methods=["GET"])
 @jwt_required()
 def get_device_battery(device_id):
+    # 🔥 KONTROLA VLASTNÍCTVA
+    user_id = int(get_jwt_identity())
+    user = User.query.get(user_id)
+    
+    if user.role != "admin":
+        device = Device.query.filter_by(id=device_id, user_id=user_id).first()
+        if not device:
+            return jsonify({"error": "Device not found or not owned by user"}), 404
+    
     t = _get_latest_telemetry(device_id)
     if not t or t.battery_voltage is None:
         return jsonify({"error": "No battery data"}), 404
+    
     return jsonify({
         "status": "success",
         "device_id": device_id,
+        "vehicle_id": t.vehicle_id,  # 🔥 PRIDAJ vehicle_id
         "battery_voltage": float(t.battery_voltage),
         "health": t.battery_health or "unknown",
         "timestamp": _iso(t.created_at)
     }), 200
 
+
 @app.route("/api/device/<int:device_id>/engine", methods=["GET"])
 @jwt_required()
 def get_device_engine(device_id):
+    # 🔥 KONTROLA VLASTNÍCTVA
+    user_id = int(get_jwt_identity())
+    user = User.query.get(user_id)
+    
+    if user.role != "admin":
+        device = Device.query.filter_by(id=device_id, user_id=user_id).first()
+        if not device:
+            return jsonify({"error": "Device not found or not owned by user"}), 404
+    
     t = _get_latest_telemetry(device_id)
     if not t or all(v is None for v in [t.engine_running, t.engine_rpm, t.engine_load, t.coolant_temp, t.oil_temp, t.intake_air_temp]):
         return jsonify({"error": "No engine data"}), 404
+    
     return jsonify({
         "status": "success",
         "device_id": device_id,
+        "vehicle_id": t.vehicle_id,  # 🔥 PRIDAJ vehicle_id
         "engine": {
             "running": bool(t.engine_running) if t.engine_running is not None else None,
             "rpm": t.engine_rpm,
@@ -2069,15 +2172,27 @@ def get_device_engine(device_id):
         "timestamp": _iso(t.created_at)
     }), 200
 
+
 @app.route("/api/device/<int:device_id>/fuel", methods=["GET"])
 @jwt_required()
 def get_device_fuel(device_id):
+    # 🔥 KONTROLA VLASTNÍCTVA
+    user_id = int(get_jwt_identity())
+    user = User.query.get(user_id)
+    
+    if user.role != "admin":
+        device = Device.query.filter_by(id=device_id, user_id=user_id).first()
+        if not device:
+            return jsonify({"error": "Device not found or not owned by user"}), 404
+    
     t = _get_latest_telemetry(device_id)
     if not t or all(v is None for v in [t.consumption_lh, t.consumption_l100km, t.maf, t.fuel_type]):
         return jsonify({"error": "No fuel data"}), 404
+    
     return jsonify({
         "status": "success",
         "device_id": device_id,
+        "vehicle_id": t.vehicle_id,  # 🔥 PRIDAJ vehicle_id
         "fuel": {
             "consumption_lh": t.consumption_lh,
             "consumption_l100km": t.consumption_l100km,
@@ -2087,14 +2202,30 @@ def get_device_fuel(device_id):
         "timestamp": _iso(t.created_at)
     }), 200
 
+
 @app.route("/api/device/<int:device_id>/speed", methods=["GET"])
 @jwt_required()
 def get_device_speed(device_id):
+    # 🔥 KONTROLA VLASTNÍCTVA
+    user_id = int(get_jwt_identity())
+    user = User.query.get(user_id)
+    
+    if user.role != "admin":
+        device = Device.query.filter_by(id=device_id, user_id=user_id).first()
+        if not device:
+            return jsonify({"error": "Device not found or not owned by user"}), 404
+    
     t = _get_latest_telemetry(device_id)
     if not t or t.speed is None:
         return jsonify({"error": "No speed data"}), 404
-    return jsonify({"status": "success", "device_id": device_id, "speed": int(t.speed), "timestamp": _iso(t.created_at)}), 200
-
+    
+    return jsonify({
+        "status": "success", 
+        "device_id": device_id,
+        "vehicle_id": t.vehicle_id,  # 🔥 PRIDAJ vehicle_id
+        "speed": int(t.speed), 
+        "timestamp": _iso(t.created_at)
+    }), 200
 # =========================
 # SHOW ALL
 # =========================
