@@ -1856,7 +1856,7 @@ def receive_can_packet():
         # RPi môže poslať telemetry v tom istom /api/can payload-e:
         # odometer, battery{..}, engine{..}, fuel{..}, speed
         # V receive_can_packet funkcii, v telemetry časti:
-        if any(k in payload for k in ["odometer", "battery", "engine", "fuel", "speed"]):
+        if any(k in payload for k in ["odometer", "battery", "engine", "fuel", "speed"]) and not payload.get("vin"):
             # 🔥 Skontroluj či máme VIN
             state = DeviceVehicle.query.filter_by(device_id=device_id).first()
             if not state or not state.last_vin_id:
