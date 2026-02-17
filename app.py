@@ -256,31 +256,6 @@ class VehicleTelemetry(db.Model):  # 🔥 Zmena názvu
 
     created_at = db.Column(db.DateTime, default=datetime.utcnow, index=True)
 
-class DeviceTelemetry(db.Model):
-    __tablename__ = "device_telemetry"
-    id = db.Column(db.Integer, primary_key=True)
-    device_id = db.Column(db.Integer, db.ForeignKey("device.id"), nullable=False, index=True)
-
-    odometer = db.Column(db.Integer, nullable=True)
-
-    battery_voltage = db.Column(db.Float, nullable=True)
-    battery_health = db.Column(db.String(30), nullable=True)
-
-    engine_running = db.Column(db.Boolean, nullable=True)
-    engine_rpm = db.Column(db.Integer, nullable=True)
-    engine_load = db.Column(db.Float, nullable=True)
-    coolant_temp = db.Column(db.Integer, nullable=True)
-    oil_temp = db.Column(db.Integer, nullable=True)
-    intake_air_temp = db.Column(db.Integer, nullable=True)
-
-    consumption_lh = db.Column(db.Float, nullable=True)
-    consumption_l100km = db.Column(db.Float, nullable=True)
-    maf = db.Column(db.Float, nullable=True)
-    fuel_type = db.Column(db.String(20), nullable=True)
-
-    speed = db.Column(db.Integer, nullable=True)
-
-    created_at = db.Column(db.DateTime, default=datetime.utcnow, index=True)
 
 # =========================
 # INIT / HEALTH
@@ -997,8 +972,6 @@ def delete_device(device_id):
             # 2. Odstrániť PendingCommands
             PendingCommand.query.filter_by(device_id=device_id).delete()
             
-            # 3. Odstrániť DeviceTelemetry
-            DeviceTelemetry.query.filter_by(device_id=device_id).delete()
             
             # 4. Odstrániť samotné zariadenie
             db.session.delete(device)
