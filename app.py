@@ -145,11 +145,6 @@ db = SQLAlchemy(app)
 # =========================
 # MODELY DB
 # =========================
-class DeviceUser(db.Model):
-    __tablename__ = "device_user"
-    user_id = db.Column(db.Integer, db.ForeignKey("users.id"), primary_key=True)
-    device_id = db.Column(db.Integer, db.ForeignKey("device.id"), primary_key=True)
-    status = db.Column(db.Boolean, default=True)
 
 class User(db.Model):
     __tablename__ = "users"
