@@ -2227,6 +2227,187 @@ def get_device_speed(device_id):
         "speed": int(t.speed), 
         "timestamp": _iso(t.created_at)
     }), 200
+
+
+
+@app.route("/api/vehicles/telemetry-comparison", methods=["GET"])
+@jwt_required()
+def vehicles_telemetry_comparison():
+    """
+    Porovnanie telemetrie pre všetky vozidlá používateľa
+    ---
+    tags:
+      - Vehicles
+    security:
+      - bearerAuth: []
+    description: |
+        Vráti najnovšie telemetrické údaje pre všetky vozidlá,
+        ktoré patria prihlásenému používateľovi.
+        
+        **Testovanie cez Postman:**
+        - Metóda: `GET`
+        - URL: `http://car-diagnostics.onrender.com/api/vehicles/telemetry-comparison`
+        - Headers: `Authorization: Bearer <token>`
+        
+        **Očakávaná odpoveď:**
+        ```json
+        {
+          "status": "success",
+          "vehicles": [
+            {
+              "device_id": 12345,
+              "vin": "1HGCM82633A123456",
+              "brand": "Honda",
+              "model": "Accord",
+              "year": "2021",
+              "online": true,
+              "telemetry": {
+                "odometer": 123456,
+                "battery_voltage": 12.6,
+                "battery_health": "good",
+                "engine_running": true,
+                "engine_rpm": 2500,
+                "engine_load": 45.5,
+                "coolant_temp": 90,
+                "oil_temp": 95,
+                "intake_air_temp": 25,
+                "consumption_l100km": 8.2,
+                "speed": 80,
+                "timestamp": "2025-02-17T10:30:00Z"
+              }
+            }
+          ],
+          "summary": {
+            "total_vehicles": 3,
+            "online_vehicles": 2,
+            "avg_consumption": 7.8,
+            "avg_speed": 65,
+            "total_odometer": 345678
+          }
+        }
+        ```
+    responses:
+      200:
+        description: Zoznam vozidiel s telemetriou
+      404:
+        description: User not found
+      500:
+        description: Server error
+    """
+    try:
+        user_id = int(get_jwt_identity())
+        user = User.query.get(user_id)
+        if not user:
+            return jsonify({"error": "User not found"}), 404
+
+        # Získať všetky zariadenia používateľa
+        if user.role == "admin":
+            devices = Device.query.all()
+        else:
+            devices = Device.query.filter_by(user_id=user_id).all()
+
+        vehicles_data = []
+        total_odometer = 0
+        vehicles_with_speed = 0
+        total_speed = 0
+        vehicles_with_consumption = 0
+        total_consumption = 0
+        online_count = 0
+
+        for device in devices:
+            # Získať VIN pre zariadenie
+            device_vehicle = DeviceVehicle.query.filter_by(device_id=device.id).first()
+            if not device_vehicle or not device_vehicle.last_vin_id:
+                # Zariadenie bez priradeného VIN
+                vehicles_data.append({
+                    "device_id": device.id,
+                    "vin": None,
+                    "brand": None,
+                    "model": None,
+                    "year": None,
+                    "online": device.status,
+                    "telemetry": None,
+                    "message": "No VIN assigned"
+                })
+                continue
+
+            vehicle = Vehicle.query.get(device_vehicle.last_vin_id)
+            if not vehicle:
+                continue
+
+            # Získať najnovšiu telemetriu pre toto vozidlo
+            latest_telemetry = (
+                VehicleTelemetry.query
+                .filter_by(vehicle_id=vehicle.id)
+                .order_by(VehicleTelemetry.created_at.desc())
+                .first()
+            )
+
+            # Telemetria pre toto vozidlo
+            telemetry_data = None
+            if latest_telemetry:
+                telemetry_data = {
+                    "odometer": latest_telemetry.odometer,
+                    "battery_voltage": latest_telemetry.battery_voltage,
+                    "battery_health": latest_telemetry.battery_health,
+                    "engine_running": latest_telemetry.engine_running,
+                    "engine_rpm": latest_telemetry.engine_rpm,
+                    "engine_load": latest_telemetry.engine_load,
+                    "coolant_temp": latest_telemetry.coolant_temp,
+                    "oil_temp": latest_telemetry.oil_temp,
+                    "intake_air_temp": latest_telemetry.intake_air_temp,
+                    "consumption_lh": latest_telemetry.consumption_lh,
+                    "consumption_l100km": latest_telemetry.consumption_l100km,
+                    "maf": latest_telemetry.maf,
+                    "fuel_type": latest_telemetry.fuel_type,
+                    "speed": latest_telemetry.speed,
+                    "timestamp": _iso(latest_telemetry.created_at)
+                }
+
+                # Agregácia pre štatistiky
+                if latest_telemetry.odometer:
+                    total_odometer += latest_telemetry.odometer
+                
+                if latest_telemetry.speed:
+                    total_speed += latest_telemetry.speed
+                    vehicles_with_speed += 1
+                
+                if latest_telemetry.consumption_l100km:
+                    total_consumption += latest_telemetry.consumption_l100km
+                    vehicles_with_consumption += 1
+
+            if device.status:
+                online_count += 1
+
+            vehicles_data.append({
+                "device_id": device.id,
+                "vin": vehicle.vin,
+                "brand": vehicle.brand,
+                "model": vehicle.model,
+                "year": vehicle.year,
+                "engine": vehicle.engine,
+                "online": device.status,
+                "telemetry": telemetry_data
+            })
+
+        # Vypočítať priemery
+        summary = {
+            "total_vehicles": len(vehicles_data),
+            "online_vehicles": online_count,
+            "avg_consumption": round(total_consumption / vehicles_with_consumption, 1) if vehicles_with_consumption > 0 else None,
+            "avg_speed": round(total_speed / vehicles_with_speed) if vehicles_with_speed > 0 else None,
+            "total_odometer": total_odometer
+        }
+
+        return jsonify({
+            "status": "success",
+            "vehicles": vehicles_data,
+            "summary": summary
+        }), 200
+
+    except Exception as e:
+        print("❌ VEHICLES TELEMETRY COMPARISON ERROR:", e)
+        return jsonify({"error": str(e)}), 500
 # =========================
 # SHOW ALL
 # =========================
