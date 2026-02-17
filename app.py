@@ -929,6 +929,95 @@ def decode_vin_nhtsa():
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
+
+# =========================
+# DELETE DEVICE
+# =========================
+@app.route("/api/device/<int:device_id>", methods=["DELETE"])
+@jwt_required()
+def delete_device(device_id):
+    """
+    Odstránenie zariadenia
+    ---
+    tags:
+      - Devices
+    security:
+      - bearerAuth: []
+    description: |
+        Odstráni zariadenie a všetky súvisiace dáta.
+        
+        **Testovanie cez Postman:**
+        - Metóda: `DELETE`
+        - URL: `http://car-diagnostics.onrender.com/api/device/12345`
+        - Headers: `Authorization: Bearer <token>`
+        
+        **Očakávaná odpoveď:**
+        ```json
+        {
+          "status": "success",
+          "message": "Device 12345 and all related data deleted successfully"
+        }
+        ```
+    parameters:
+      - in: path
+        name: device_id
+        required: true
+        type: integer
+    responses:
+      200:
+        description: Zariadenie odstránené
+      403:
+        description: Nemáte oprávnenie odstrániť toto zariadenie
+      404:
+        description: Zariadenie neexistuje
+      500:
+        description: Server error
+    """
+    try:
+        user_id = int(get_jwt_identity())
+        user = User.query.get(user_id)
+        
+        if not user:
+            return jsonify({"error": "User not found"}), 404
+
+        # Nájsť zariadenie
+        if user.role == "admin":
+            device = Device.query.get(device_id)
+        else:
+            device = Device.query.filter_by(id=device_id, user_id=user_id).first()
+
+        if not device:
+            return jsonify({"error": "Device not found or not owned by user"}), 404
+
+        # Odstrániť všetky súvisiace záznamy
+        try:
+            # 1. Odstrániť DeviceVehicle
+            DeviceVehicle.query.filter_by(device_id=device_id).delete()
+            
+            # 2. Odstrániť PendingCommands
+            PendingCommand.query.filter_by(device_id=device_id).delete()
+            
+            # 3. Odstrániť DeviceTelemetry
+            DeviceTelemetry.query.filter_by(device_id=device_id).delete()
+            
+            # 4. Odstrániť samotné zariadenie
+            db.session.delete(device)
+            
+            db.session.commit()
+            
+            return jsonify({
+                "status": "success",
+                "message": f"Device {device_id} and all related data deleted successfully"
+            }), 200
+            
+        except Exception as e:
+            db.session.rollback()
+            print(f"❌ Error deleting device data: {e}")
+            return jsonify({"error": "Failed to delete device data"}), 500
+
+    except Exception as e:
+        print("❌ DELETE DEVICE ERROR:", e)
+        return jsonify({"error": str(e)}), 500
 # =========================
 # ADD DEVICE
 # =========================
