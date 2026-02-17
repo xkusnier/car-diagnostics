@@ -867,37 +867,6 @@ def dtc_history_full():
         print("❌ DTC HISTORY FULL ERROR:", e)
         return jsonify({"error": str(e)}), 500
 
-# =========================
-# VIN decode NHTSA
-# =========================
-@app.route("/api/vin/nhtsa", methods=["POST"])
-def decode_vin_nhtsa():
-    try:
-        payload = request.get_json()
-        vin = payload.get("vin")
-        if not vin:
-            return jsonify({"error": "Missing VIN"}), 400
-
-        url = f"https://vpic.nhtsa.dot.gov/api/vehicles/decodevinvaluesextended/{vin}?format=json"
-        response = requests.get(url)
-        data = response.json()
-
-        if "Results" not in data:
-            return jsonify({"error": "Unexpected API response"}), 500
-
-        vehicle_info = data["Results"][0]
-        return jsonify({
-            "vin": vin,
-            "make": vehicle_info.get("Make"),
-            "brand": vehicle_info.get("Brand"),
-            "model": vehicle_info.get("Model"),
-            "year": vehicle_info.get("ModelYear"),
-            "engine": vehicle_info.get("EngineModel"),
-            "bodyClass": vehicle_info.get("BodyClass"),
-            "manufacturer": vehicle_info.get("ManufacturerName"),
-        }), 200
-    except Exception as e:
-        return jsonify({"error": str(e)}), 500
 
 
 # =========================
@@ -2073,56 +2042,7 @@ def device_offline(device_id):
         db.session.rollback()
         return jsonify({"error": str(e)}), 500
 
-# =========================
-# VIN decode (apiverve)
-# =========================
-@app.route("/api/vindecode", methods=["POST"])
-def decode_vin_apiverve():
-    try:
-        payload = request.get_json()
-        vin = payload.get("vin")
 
-        if not vin:
-            return jsonify({"error": "Missing 'vin' in body"}), 400
-
-        api_key = os.getenv("VINDECODER_API_KEY")
-        if not api_key:
-            return jsonify({"error": "Missing VINDECODER_API_KEY env var on server"}), 500
-
-        url = f"https://api.apiverve.com/v1/vindecoder?vin={vin}"
-        headers = {"X-API-Key": api_key}
-
-        response = requests.get(url, headers=headers, timeout=10)
-
-        if response.status_code != 200:
-            return jsonify({
-                "error": "VIN decoder API error",
-                "status": response.status_code,
-                "details": response.text
-            }), response.status_code
-
-        data = response.json()
-        if "data" in data:
-            data = data["data"]
-
-        cleaned = {
-            "vin": vin,
-            "make": data.get("make"),
-            "brand": data.get("brand"),
-            "model": data.get("model"),
-            "year": data.get("year"),
-            "trim": data.get("trim"),
-            "engine": data.get("engine"),
-            "transmission": data.get("transmission"),
-            "driveType": data.get("driveType"),
-            "fuelType": data.get("fuelType"),
-            "bodyStyle": data.get("bodyStyle")
-        }
-
-        return jsonify({"status": "success", "source": "apiverve", "data": cleaned}), 200
-
-    except Exception as e:
-        return jsonify({"error": str(e)}), 500
 
 # =========================
 # GET "last known telemetry" endpoints (ponechane)
