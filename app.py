@@ -8,6 +8,8 @@ from flask_cors import CORS
 import csv
 from io import StringIO
 from flask_jwt_extended import JWTManager, create_access_token, jwt_required, get_jwt_identity
+# Pridaj tento import k ostatným importom
+from sqlalchemy import func
 
 # ✅ NEW: WebSocket (Socket.IO)
 from flask_socketio import SocketIO, emit, join_room
