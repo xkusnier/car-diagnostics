@@ -2064,6 +2064,7 @@ def receive_can_packet():
         
             device.status = True
         
+            # 🔥 TVORBA DeviceVehicle (už existuje)
             state = DeviceVehicle.query.filter_by(device_id=device_id).first()
             if not state:
                 state = DeviceVehicle(device_id=device_id, last_vin_id=vehicle.id)
@@ -2071,25 +2072,25 @@ def receive_can_packet():
             else:
                 state.last_vin_id = vehicle.id
         
-            db.session.commit()
-            
-            # ✅ PRIDAJ PERMANENTNÝ VZŤAH User-Vehicle (iba ak zariadenie patrí používateľovi)
+            # 🔥 PRIDÁME TVORBU UserVehicle (na rovnakom mieste)
             if device.user_id:
-                # Skontroluj či už existuje vzťah
-                existing = UserVehicle.query.filter_by(
-                    user_id=device.user_id, 
+                # Skontroluj či už existuje vzťah user-vehicle
+                user_vehicle = UserVehicle.query.filter_by(
+                    user_id=device.user_id,
                     vehicle_id=vehicle.id
                 ).first()
                 
-                if not existing:
+                if not user_vehicle:
                     # Vytvor nový permanentný vzťah
                     user_vehicle = UserVehicle(
                         user_id=device.user_id,
                         vehicle_id=vehicle.id
                     )
                     db.session.add(user_vehicle)
-                    db.session.commit()
-                    print(f"✅ Permanent user-vehicle relationship created: user {device.user_id} - vehicle {vehicle.id}")
+                    print(f"✅ UserVehicle created: user {device.user_id} - vehicle {vehicle.id}")
+        
+            db.session.commit()  
+
         
             return jsonify({
                 "status": "VIN stored",
