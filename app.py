@@ -198,6 +198,20 @@ class DTCCodeHistory(db.Model):
     severity = db.Column(db.String(20), default="medium")
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
 
+class UserVehicle(db.Model):
+    __tablename__ = "user_vehicles"
+    id = db.Column(db.Integer, primary_key=True)
+    user_id = db.Column(db.Integer, db.ForeignKey("users.id"), nullable=False)
+    vehicle_id = db.Column(db.Integer, db.ForeignKey("vehicles.id"), nullable=False)
+    
+    # Vzťahy
+    user = db.relationship("User", backref=db.backref("owned_vehicles", lazy="dynamic"))
+    vehicle = db.relationship("Vehicle", backref=db.backref("owners", lazy="dynamic"))
+    
+    __table_args__ = (
+        db.UniqueConstraint('user_id', 'vehicle_id', name='unique_user_vehicle'),
+    )
+
 class PendingCommand(db.Model):
     __tablename__ = "pending_commands"
     id = db.Column(db.Integer, primary_key=True)
@@ -2012,11 +2026,12 @@ def receive_can_packet():
             return jsonify({"status": "DTC cleared", "vin_id": state.last_vin_id}), 200
 
         # 2) VIN
+        # 2) VIN
         if vin:
             vin = vin.strip().upper()
             if len(vin) != 17:
                 return jsonify({"error": "VIN must be 17 characters"}), 400
-
+        
             vehicle = Vehicle.query.filter_by(vin=vin).first()
             if not vehicle:
                 vehicle = Vehicle(vin=vin)
@@ -2046,18 +2061,36 @@ def receive_can_packet():
                     updated = True
                 if updated:
                     db.session.commit()
-
+        
             device.status = True
-
+        
             state = DeviceVehicle.query.filter_by(device_id=device_id).first()
             if not state:
                 state = DeviceVehicle(device_id=device_id, last_vin_id=vehicle.id)
                 db.session.add(state)
             else:
                 state.last_vin_id = vehicle.id
-
+        
             db.session.commit()
-
+            
+            # ✅ PRIDAJ PERMANENTNÝ VZŤAH User-Vehicle (iba ak zariadenie patrí používateľovi)
+            if device.user_id:
+                # Skontroluj či už existuje vzťah
+                existing = UserVehicle.query.filter_by(
+                    user_id=device.user_id, 
+                    vehicle_id=vehicle.id
+                ).first()
+                
+                if not existing:
+                    # Vytvor nový permanentný vzťah
+                    user_vehicle = UserVehicle(
+                        user_id=device.user_id,
+                        vehicle_id=vehicle.id
+                    )
+                    db.session.add(user_vehicle)
+                    db.session.commit()
+                    print(f"✅ Permanent user-vehicle relationship created: user {device.user_id} - vehicle {vehicle.id}")
+        
             return jsonify({
                 "status": "VIN stored",
                 "vin": vin,
