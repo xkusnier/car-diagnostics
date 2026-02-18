@@ -2418,11 +2418,25 @@ def vehicles_telemetry_comparison():
         user_vehicles = UserVehicle.query.filter_by(user_id=user_id).all()
         
         vehicles_data = []
+        online_count = 0
 
         for uv in user_vehicles:
             vehicle = uv.vehicle
 
-            # ✅ POČÍTANIE ŠTATISTÍK Z HISTORY TABUĽKY (rovnaké ako predtým)
+            # Zisti či existuje nejaké zariadenie aktuálne priradené k tomuto vozidlu
+            device_vehicle = DeviceVehicle.query.filter_by(last_vin_id=vehicle.id).first()
+            device_status = False
+            device_id = None
+            
+            if device_vehicle:
+                device = Device.query.get(device_vehicle.device_id)
+                if device:
+                    device_status = device.status
+                    device_id = device.id
+                    if device_status:
+                        online_count += 1
+
+            # ✅ POČÍTANIE ŠTATISTÍK Z HISTORY TABUĽKY
             stats = db.session.query(
                 func.avg(VehicleTelemetryHistory.engine_rpm).label('avg_rpm'),
                 func.avg(VehicleTelemetryHistory.speed).label('avg_speed'),
@@ -2435,13 +2449,14 @@ def vehicles_telemetry_comparison():
             # Získať posledný odometer z LIVE tabuľky (aktuálny stav)
             live = VehicleTelemetryLive.query.filter_by(vehicle_id=vehicle.id).first()
 
-            # ✅ NEPOUŽÍVAME device_status, online, atď.
             vehicles_data.append({
+                "device_id": device_id,  # Môže byť None
                 "vin": vehicle.vin,
                 "brand": vehicle.brand,
                 "model": vehicle.model,
                 "year": vehicle.year,
                 "engine": vehicle.engine,
+                "online": device_status,  # True ak je nejaké zariadenie online s týmto VIN
                 "statistics": {
                     "avg_rpm": round(stats.avg_rpm) if stats and stats.avg_rpm else None,
                     "avg_speed": round(stats.avg_speed) if stats and stats.avg_speed else None,
@@ -2456,6 +2471,7 @@ def vehicles_telemetry_comparison():
         # Celkové štatistiky
         total_stats = {
             "total_vehicles": len(vehicles_data),
+            "online_vehicles": online_count,
             "total_samples": sum(v.get("statistics", {}).get("samples", 0) for v in vehicles_data)
         }
 
