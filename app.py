@@ -2406,37 +2406,7 @@ def vehicles_telemetry_comparison():
       - bearerAuth: []
     description: |
         Vráti štatistické údaje (priemery) z historických telemetrických dát.
-        
-        **Testovanie cez Postman:**
-        - Metóda: `GET`
-        - URL: `http://car-diagnostics.onrender.com/api/vehicles/telemetry-comparison`
-        - Headers: `Authorization: Bearer <token>`
-        
-        **Očakávaná odpoveď:**
-        ```json
-        {
-          "status": "success",
-          "vehicles": [
-            {
-              "device_id": 12345,
-              "vin": "1HGCM82633A123456",
-              "brand": "Honda",
-              "model": "Accord",
-              "year": "2021",
-              "online": true,
-              "statistics": {
-                "avg_rpm": 2450,
-                "avg_speed": 65,
-                "avg_consumption": 8.2,
-                "max_rpm": 6500,
-                "min_rpm": 750,
-                "total_odometer": 123456,
-                "samples": 150
-              }
-            }
-          ]
-        }
-        ```
+        Zobrazuje všetky vozidlá, ktoré boli kedy priradené k používateľovi.
     """
     try:
         user_id = int(get_jwt_identity())
@@ -2444,39 +2414,15 @@ def vehicles_telemetry_comparison():
         if not user:
             return jsonify({"error": "User not found"}), 404
 
-        # Získať všetky zariadenia používateľa
-        if user.role == "admin":
-            devices = Device.query.all()
-        else:
-            devices = Device.query.filter_by(user_id=user_id).all()
-
+        # ✅ ZÍSKAŤ VŠETKY VOZIDLÁ POUŽÍVATEĽA Z user_vehicles
+        user_vehicles = UserVehicle.query.filter_by(user_id=user_id).all()
+        
         vehicles_data = []
-        online_count = 0
 
-        for device in devices:
-            # Získať VIN pre zariadenie
-            device_vehicle = DeviceVehicle.query.filter_by(device_id=device.id).first()
-            if not device_vehicle or not device_vehicle.last_vin_id:
-                vehicles_data.append({
-                    "device_id": device.id,
-                    "vin": None,
-                    "brand": None,
-                    "model": None,
-                    "year": None,
-                    "online": device.status,
-                    "statistics": None,
-                    "message": "No VIN assigned"
-                })
-                continue
+        for uv in user_vehicles:
+            vehicle = uv.vehicle
 
-            vehicle = Vehicle.query.get(device_vehicle.last_vin_id)
-            if not vehicle:
-                continue
-
-            if device.status:
-                online_count += 1
-
-            # ✅ POČÍTANIE ŠTATISTÍK Z HISTORY TABUĽKY
+            # ✅ POČÍTANIE ŠTATISTÍK Z HISTORY TABUĽKY (rovnaké ako predtým)
             stats = db.session.query(
                 func.avg(VehicleTelemetryHistory.engine_rpm).label('avg_rpm'),
                 func.avg(VehicleTelemetryHistory.speed).label('avg_speed'),
@@ -2489,29 +2435,27 @@ def vehicles_telemetry_comparison():
             # Získať posledný odometer z LIVE tabuľky (aktuálny stav)
             live = VehicleTelemetryLive.query.filter_by(vehicle_id=vehicle.id).first()
 
+            # ✅ NEPOUŽÍVAME device_status, online, atď.
             vehicles_data.append({
-                "device_id": device.id,
                 "vin": vehicle.vin,
                 "brand": vehicle.brand,
                 "model": vehicle.model,
                 "year": vehicle.year,
                 "engine": vehicle.engine,
-                "online": device.status,
                 "statistics": {
-                    "avg_rpm": round(stats.avg_rpm) if stats.avg_rpm else None,
-                    "avg_speed": round(stats.avg_speed) if stats.avg_speed else None,
-                    "avg_consumption": round(stats.avg_consumption, 1) if stats.avg_consumption else None,
-                    "max_rpm": stats.max_rpm if stats.max_rpm else None,
-                    "min_rpm": stats.min_rpm if stats.min_rpm else None,
+                    "avg_rpm": round(stats.avg_rpm) if stats and stats.avg_rpm else None,
+                    "avg_speed": round(stats.avg_speed) if stats and stats.avg_speed else None,
+                    "avg_consumption": round(stats.avg_consumption, 1) if stats and stats.avg_consumption else None,
+                    "max_rpm": stats.max_rpm if stats and stats.max_rpm else None,
+                    "min_rpm": stats.min_rpm if stats and stats.min_rpm else None,
                     "total_odometer": live.odometer if live else None,
-                    "samples": stats.samples if stats.samples else 0
+                    "samples": stats.samples if stats and stats.samples else 0
                 }
             })
 
         # Celkové štatistiky
         total_stats = {
             "total_vehicles": len(vehicles_data),
-            "online_vehicles": online_count,
             "total_samples": sum(v.get("statistics", {}).get("samples", 0) for v in vehicles_data)
         }
 
@@ -2523,7 +2467,7 @@ def vehicles_telemetry_comparison():
 
     except Exception as e:
         print("❌ VEHICLES TELEMETRY COMPARISON ERROR:", e)
-        return jsonify({"error": str(e)}), 500# =========================
+        return jsonify({"error": str(e)}), 500
 # SHOW ALL
 # =========================
 @app.route("/api/all", methods=["GET"])
