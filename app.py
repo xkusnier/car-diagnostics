@@ -1906,16 +1906,32 @@ def receive_can_packet():
                 "timestamp": t["timestamp"]
             }), 201
         # 1) CLEAR_DTCS confirmation
+        # V receive_can_packet funkcii, v časti clear_status:
         if clear_status is not None:
             state = DeviceVehicle.query.filter_by(device_id=device_id).first()
             if not state or not state.last_vin_id:
                 return jsonify({"error": "No VIN associated for clear"}), 400
-
+        
             if clear_status == "ok":
                 DTCCodeActive.query.filter_by(vin_id=state.last_vin_id).delete()
                 db.session.commit()
+                
+                # ✅ POSLI WEBHOOK NOTIFIKÁCIU
+                socketio.emit("clear_confirmation", {
+                    "device_id": device_id,
+                    "status": "success",
+                    "vin_id": state.last_vin_id,
+                    "timestamp": datetime.utcnow().isoformat()
+                }, room=None)  # room=None znamená broadcast všetkým
+                
+                # Tiež pošli update DTC (prázdny zoznam)
+                socketio.emit("dtc_updated", {
+                    "device_id": device_id,
+                    "dtc_codes": []
+                }, room=None)
+                
                 return jsonify({"status": "DTC cleared", "vin_id": state.last_vin_id}), 200
-
+        
             return jsonify({"status": "Clear failed"}), 200
 
         # 2) VIN
