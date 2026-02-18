@@ -252,6 +252,50 @@ class VehicleTelemetry(db.Model):  # 🔥 Zmena názvu
     created_at = db.Column(db.DateTime, default=datetime.utcnow, index=True)
 
 
+class VehicleTelemetryLive(db.Model):
+    __tablename__ = "vehicle_telemetry_live"
+    id = db.Column(db.Integer, primary_key=True)
+    vehicle_id = db.Column(db.Integer, db.ForeignKey("vehicles.id"), nullable=False, unique=True, index=True)
+    vehicle = db.relationship("Vehicle", backref=db.backref("live_telemetry", uselist=False))
+    
+    odometer = db.Column(db.Integer, nullable=True)
+    battery_voltage = db.Column(db.Float, nullable=True)
+    battery_health = db.Column(db.String(30), nullable=True)
+    engine_running = db.Column(db.Boolean, nullable=True)
+    engine_rpm = db.Column(db.Integer, nullable=True)
+    engine_load = db.Column(db.Float, nullable=True)
+    coolant_temp = db.Column(db.Integer, nullable=True)
+    oil_temp = db.Column(db.Integer, nullable=True)
+    intake_air_temp = db.Column(db.Integer, nullable=True)
+    consumption_lh = db.Column(db.Float, nullable=True)
+    consumption_l100km = db.Column(db.Float, nullable=True)
+    maf = db.Column(db.Float, nullable=True)
+    fuel_type = db.Column(db.String(20), nullable=True)
+    speed = db.Column(db.Integer, nullable=True)
+    created_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+class VehicleTelemetryHistory(db.Model):
+    __tablename__ = "vehicle_telemetry_history"
+    id = db.Column(db.Integer, primary_key=True)
+    vehicle_id = db.Column(db.Integer, db.ForeignKey("vehicles.id"), nullable=False, index=True)
+    vehicle = db.relationship("Vehicle", backref=db.backref("telemetry_history", lazy="dynamic"))
+    
+    odometer = db.Column(db.Integer, nullable=True)
+    battery_voltage = db.Column(db.Float, nullable=True)
+    battery_health = db.Column(db.String(30), nullable=True)
+    engine_running = db.Column(db.Boolean, nullable=True)
+    engine_rpm = db.Column(db.Integer, nullable=True)
+    engine_load = db.Column(db.Float, nullable=True)
+    coolant_temp = db.Column(db.Integer, nullable=True)
+    oil_temp = db.Column(db.Integer, nullable=True)
+    intake_air_temp = db.Column(db.Integer, nullable=True)
+    consumption_lh = db.Column(db.Float, nullable=True)
+    consumption_l100km = db.Column(db.Float, nullable=True)
+    maf = db.Column(db.Float, nullable=True)
+    fuel_type = db.Column(db.String(20), nullable=True)
+    speed = db.Column(db.Integer, nullable=True)
+    created_at = db.Column(db.DateTime, default=datetime.utcnow, index=True)
+
 # =========================
 # INIT / HEALTH
 # =========================
@@ -367,11 +411,9 @@ def _telemetry_payload(device_id: int, payload: dict) -> dict:
         "speed": payload.get("speed"),
         "timestamp": payload.get("timestamp") or _iso(datetime.utcnow()),
     }
-
 def _save_telemetry_to_db(device_id: int, t: dict) -> None:
-    """Uloží telemetriu do DB - nájde vehicle_id cez DeviceVehicle"""
+    """Uloží telemetriu do DB - live (posledná) + history (všetky)"""
     try:
-        # 🔥 Získať vehicle_id z DeviceVehicle
         device_vehicle = DeviceVehicle.query.filter_by(device_id=device_id).first()
         if not device_vehicle or not device_vehicle.last_vin_id:
             print(f"❌ No vehicle associated with device {device_id}")
@@ -383,8 +425,9 @@ def _save_telemetry_to_db(device_id: int, t: dict) -> None:
         engine = t.get("engine") or {}
         fuel = t.get("fuel") or {}
 
-        row = VehicleTelemetry(  # 🔥 Použi nový model
-            vehicle_id=vehicle_id,  # 🔥 Ukladáme vehicle_id, nie device_id
+        # 1️⃣ ULOŽ DO HISTORY (každý packet)
+        history_row = VehicleTelemetryHistory(
+            vehicle_id=vehicle_id,
             odometer=t.get("odometer"),
             battery_voltage=battery.get("battery_voltage"),
             battery_health=battery.get("health"),
@@ -401,14 +444,54 @@ def _save_telemetry_to_db(device_id: int, t: dict) -> None:
             speed=t.get("speed"),
             created_at=datetime.utcnow(),
         )
-        db.session.add(row)
+        db.session.add(history_row)
+
+        # 2️⃣ ULOŽ DO LIVE (posledný packet) - UPDATE alebo INSERT
+        live_row = VehicleTelemetryLive.query.filter_by(vehicle_id=vehicle_id).first()
+        if live_row:
+            # Update existujúceho
+            live_row.odometer = t.get("odometer")
+            live_row.battery_voltage = battery.get("battery_voltage")
+            live_row.battery_health = battery.get("health")
+            live_row.engine_running = engine.get("running")
+            live_row.engine_rpm = engine.get("rpm")
+            live_row.engine_load = engine.get("load")
+            live_row.coolant_temp = engine.get("coolant_temp")
+            live_row.oil_temp = engine.get("oil_temp")
+            live_row.intake_air_temp = engine.get("intake_air_temp")
+            live_row.consumption_lh = fuel.get("consumption_lh")
+            live_row.consumption_l100km = fuel.get("consumption_l100km")
+            live_row.maf = fuel.get("maf")
+            live_row.fuel_type = fuel.get("type")
+            live_row.speed = t.get("speed")
+            live_row.created_at = datetime.utcnow()
+        else:
+            # Nový záznam
+            live_row = VehicleTelemetryLive(
+                vehicle_id=vehicle_id,
+                odometer=t.get("odometer"),
+                battery_voltage=battery.get("battery_voltage"),
+                battery_health=battery.get("health"),
+                engine_running=engine.get("running"),
+                engine_rpm=engine.get("rpm"),
+                engine_load=engine.get("load"),
+                coolant_temp=engine.get("coolant_temp"),
+                oil_temp=engine.get("oil_temp"),
+                intake_air_temp=engine.get("intake_air_temp"),
+                consumption_lh=fuel.get("consumption_lh"),
+                consumption_l100km=fuel.get("consumption_l100km"),
+                maf=fuel.get("maf"),
+                fuel_type=fuel.get("type"),
+                speed=t.get("speed"),
+            )
+            db.session.add(live_row)
+
         db.session.commit()
-        print(f"✅ Telemetry saved for vehicle_id: {vehicle_id}")
+        print(f"✅ Telemetry saved for vehicle_id: {vehicle_id} (live + history)")
         
     except Exception as e:
         db.session.rollback()
-        print(f"❌ Error saving telemetry: {e}")
-# =========================
+        print(f"❌ Error saving telemetry: {e}")# =========================
 # ✅ NEW: SOCKET.IO EVENTS
 # =========================
 @socketio.on("connect")
@@ -2223,6 +2306,57 @@ def get_device_speed(device_id):
     }), 200
 
 
+# Nový endpoint pre live data
+@app.route("/api/device/<int:device_id>/live", methods=["GET"])
+@jwt_required()
+def get_device_live(device_id):
+    """Získa kompletné live data pre zariadenie (z LIVE tabuľky)"""
+    try:
+        user_id = int(get_jwt_identity())
+        user = User.query.get(user_id)
+        
+        if user.role != "admin":
+            device = Device.query.filter_by(id=device_id, user_id=user_id).first()
+            if not device:
+                return jsonify({"error": "Device not found"}), 404
+        
+        vehicle_id = _get_vehicle_id_from_device(device_id)
+        if not vehicle_id:
+            return jsonify({"error": "No VIN associated"}), 404
+        
+        live = VehicleTelemetryLive.query.filter_by(vehicle_id=vehicle_id).first()
+        if not live:
+            return jsonify({"error": "No live data"}), 404
+        
+        return jsonify({
+            "status": "success",
+            "device_id": device_id,
+            "vehicle_id": vehicle_id,
+            "odometer": live.odometer,
+            "battery": {
+                "voltage": live.battery_voltage,
+                "health": live.battery_health
+            },
+            "engine": {
+                "running": live.engine_running,
+                "rpm": live.engine_rpm,
+                "load": live.engine_load,
+                "coolant_temp": live.coolant_temp,
+                "oil_temp": live.oil_temp,
+                "intake_air_temp": live.intake_air_temp
+            },
+            "fuel": {
+                "consumption_lh": live.consumption_lh,
+                "consumption_l100km": live.consumption_l100km,
+                "maf": live.maf,
+                "type": live.fuel_type
+            },
+            "speed": live.speed,
+            "timestamp": _iso(live.created_at)
+        }), 200
+        
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
 
 @app.route("/api/vehicles/telemetry-comparison", methods=["GET"])
 @jwt_required()
@@ -2235,8 +2369,7 @@ def vehicles_telemetry_comparison():
     security:
       - bearerAuth: []
     description: |
-        Vráti najnovšie telemetrické údaje pre všetky vozidlá,
-        ktoré patria prihlásenému používateľovi.
+        Vráti štatistické údaje (priemery) z historických telemetrických dát.
         
         **Testovanie cez Postman:**
         - Metóda: `GET`
@@ -2255,38 +2388,19 @@ def vehicles_telemetry_comparison():
               "model": "Accord",
               "year": "2021",
               "online": true,
-              "telemetry": {
-                "odometer": 123456,
-                "battery_voltage": 12.6,
-                "battery_health": "good",
-                "engine_running": true,
-                "engine_rpm": 2500,
-                "engine_load": 45.5,
-                "coolant_temp": 90,
-                "oil_temp": 95,
-                "intake_air_temp": 25,
-                "consumption_l100km": 8.2,
-                "speed": 80,
-                "timestamp": "2025-02-17T10:30:00Z"
+              "statistics": {
+                "avg_rpm": 2450,
+                "avg_speed": 65,
+                "avg_consumption": 8.2,
+                "max_rpm": 6500,
+                "min_rpm": 750,
+                "total_odometer": 123456,
+                "samples": 150
               }
             }
-          ],
-          "summary": {
-            "total_vehicles": 3,
-            "online_vehicles": 2,
-            "avg_consumption": 7.8,
-            "avg_speed": 65,
-            "total_odometer": 345678
-          }
+          ]
         }
         ```
-    responses:
-      200:
-        description: Zoznam vozidiel s telemetriou
-      404:
-        description: User not found
-      500:
-        description: Server error
     """
     try:
         user_id = int(get_jwt_identity())
@@ -2301,18 +2415,12 @@ def vehicles_telemetry_comparison():
             devices = Device.query.filter_by(user_id=user_id).all()
 
         vehicles_data = []
-        total_odometer = 0
-        vehicles_with_speed = 0
-        total_speed = 0
-        vehicles_with_consumption = 0
-        total_consumption = 0
         online_count = 0
 
         for device in devices:
             # Získať VIN pre zariadenie
             device_vehicle = DeviceVehicle.query.filter_by(device_id=device.id).first()
             if not device_vehicle or not device_vehicle.last_vin_id:
-                # Zariadenie bez priradeného VIN
                 vehicles_data.append({
                     "device_id": device.id,
                     "vin": None,
@@ -2320,7 +2428,7 @@ def vehicles_telemetry_comparison():
                     "model": None,
                     "year": None,
                     "online": device.status,
-                    "telemetry": None,
+                    "statistics": None,
                     "message": "No VIN assigned"
                 })
                 continue
@@ -2329,49 +2437,21 @@ def vehicles_telemetry_comparison():
             if not vehicle:
                 continue
 
-            # Získať najnovšiu telemetriu pre toto vozidlo
-            latest_telemetry = (
-                VehicleTelemetry.query
-                .filter_by(vehicle_id=vehicle.id)
-                .order_by(VehicleTelemetry.created_at.desc())
-                .first()
-            )
-
-            # Telemetria pre toto vozidlo
-            telemetry_data = None
-            if latest_telemetry:
-                telemetry_data = {
-                    "odometer": latest_telemetry.odometer,
-                    "battery_voltage": latest_telemetry.battery_voltage,
-                    "battery_health": latest_telemetry.battery_health,
-                    "engine_running": latest_telemetry.engine_running,
-                    "engine_rpm": latest_telemetry.engine_rpm,
-                    "engine_load": latest_telemetry.engine_load,
-                    "coolant_temp": latest_telemetry.coolant_temp,
-                    "oil_temp": latest_telemetry.oil_temp,
-                    "intake_air_temp": latest_telemetry.intake_air_temp,
-                    "consumption_lh": latest_telemetry.consumption_lh,
-                    "consumption_l100km": latest_telemetry.consumption_l100km,
-                    "maf": latest_telemetry.maf,
-                    "fuel_type": latest_telemetry.fuel_type,
-                    "speed": latest_telemetry.speed,
-                    "timestamp": _iso(latest_telemetry.created_at)
-                }
-
-                # Agregácia pre štatistiky
-                if latest_telemetry.odometer:
-                    total_odometer += latest_telemetry.odometer
-                
-                if latest_telemetry.speed:
-                    total_speed += latest_telemetry.speed
-                    vehicles_with_speed += 1
-                
-                if latest_telemetry.consumption_l100km:
-                    total_consumption += latest_telemetry.consumption_l100km
-                    vehicles_with_consumption += 1
-
             if device.status:
                 online_count += 1
+
+            # ✅ POČÍTANIE ŠTATISTÍK Z HISTORY TABUĽKY
+            stats = db.session.query(
+                func.avg(VehicleTelemetryHistory.engine_rpm).label('avg_rpm'),
+                func.avg(VehicleTelemetryHistory.speed).label('avg_speed'),
+                func.avg(VehicleTelemetryHistory.consumption_l100km).label('avg_consumption'),
+                func.max(VehicleTelemetryHistory.engine_rpm).label('max_rpm'),
+                func.min(VehicleTelemetryHistory.engine_rpm).label('min_rpm'),
+                func.count(VehicleTelemetryHistory.id).label('samples')
+            ).filter(VehicleTelemetryHistory.vehicle_id == vehicle.id).first()
+
+            # Získať posledný odometer z LIVE tabuľky (aktuálny stav)
+            live = VehicleTelemetryLive.query.filter_by(vehicle_id=vehicle.id).first()
 
             vehicles_data.append({
                 "device_id": device.id,
@@ -2381,28 +2461,33 @@ def vehicles_telemetry_comparison():
                 "year": vehicle.year,
                 "engine": vehicle.engine,
                 "online": device.status,
-                "telemetry": telemetry_data
+                "statistics": {
+                    "avg_rpm": round(stats.avg_rpm) if stats.avg_rpm else None,
+                    "avg_speed": round(stats.avg_speed) if stats.avg_speed else None,
+                    "avg_consumption": round(stats.avg_consumption, 1) if stats.avg_consumption else None,
+                    "max_rpm": stats.max_rpm if stats.max_rpm else None,
+                    "min_rpm": stats.min_rpm if stats.min_rpm else None,
+                    "total_odometer": live.odometer if live else None,
+                    "samples": stats.samples if stats.samples else 0
+                }
             })
 
-        # Vypočítať priemery
-        summary = {
+        # Celkové štatistiky
+        total_stats = {
             "total_vehicles": len(vehicles_data),
             "online_vehicles": online_count,
-            "avg_consumption": round(total_consumption / vehicles_with_consumption, 1) if vehicles_with_consumption > 0 else None,
-            "avg_speed": round(total_speed / vehicles_with_speed) if vehicles_with_speed > 0 else None,
-            "total_odometer": total_odometer
+            "total_samples": sum(v.get("statistics", {}).get("samples", 0) for v in vehicles_data)
         }
 
         return jsonify({
             "status": "success",
             "vehicles": vehicles_data,
-            "summary": summary
+            "summary": total_stats
         }), 200
 
     except Exception as e:
         print("❌ VEHICLES TELEMETRY COMPARISON ERROR:", e)
-        return jsonify({"error": str(e)}), 500
-# =========================
+        return jsonify({"error": str(e)}), 500# =========================
 # SHOW ALL
 # =========================
 @app.route("/api/all", methods=["GET"])
