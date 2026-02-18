@@ -1981,35 +1981,44 @@ def receive_can_packet():
                 "model": vehicle.model,
                 "engine": vehicle.engine
             }), 201
-
+        # 3) DTC
+        # 3) DTC
         # 3) DTC
         if dtc_code:
             dtc_code = dtc_code.strip().upper()
-
+        
             state = DeviceVehicle.query.filter_by(device_id=device_id).first()
             if not state or not state.last_vin_id:
                 return jsonify({"error": "No VIN associated with this device"}), 400
-
+        
             vehicle = Vehicle.query.get(state.last_vin_id)
             if not vehicle:
                 return jsonify({"error": "Vehicle not found"}), 404
-
+        
             meaning = DtcCodeMeaning.query.filter(
                 db.func.lower(DtcCodeMeaning.dtc_code) == dtc_code.lower()
             ).first()
-
+        
             description = meaning.dtc_description if meaning else ""
             severity = detect_severity_from_description(description)
-
+        
             db.session.add(DTCCodeHistory(vin_id=vehicle.id, dtc_code=dtc_code, severity=severity))
-
+        
             DTCCodeActive.query.filter_by(vin_id=vehicle.id, dtc_code=dtc_code).delete()
             db.session.add(DTCCodeActive(vin_id=vehicle.id, dtc_code=dtc_code, severity=severity))
-
+        
             db.session.commit()
-
+            
+            # ✅ PRIDAJ TOTO - WebSocket pre read DTC
+            socketio.emit("dtc_update", {
+                "device_id": device_id,
+                "dtc_code": dtc_code,
+                "severity": severity,
+                "description": description,
+                "timestamp": datetime.utcnow().isoformat()
+            })
+        
             return jsonify({"status": "DTC stored", "vin": vehicle.vin, "dtc": dtc_code, "severity": severity}), 201
-
         return jsonify({"status": "ignored", "message": "No recognized payload fields"}), 200
 
     except Exception as e:
