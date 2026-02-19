@@ -190,6 +190,52 @@ class DTCCodeActive(db.Model):
     severity = db.Column(db.String(20), default="medium")
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
 
+class Trip(db.Model):
+    __tablename__ = "trips"
+    id = db.Column(db.Integer, primary_key=True)
+    vehicle_id = db.Column(db.Integer, db.ForeignKey("vehicles.id"), nullable=False, index=True)
+    vehicle = db.relationship("Vehicle", backref=db.backref("trips", lazy="dynamic"))
+    
+    # Časové údaje
+    start_time = db.Column(db.DateTime, nullable=False)
+    end_time = db.Column(db.DateTime, nullable=True)
+    duration_seconds = db.Column(db.Integer, nullable=True)  # v sekundách
+    
+    # Počet záznamov v tejto jazde
+    samples_count = db.Column(db.Integer, default=0)
+    
+    # Odometer
+    start_odometer = db.Column(db.Integer, nullable=True)
+    end_odometer = db.Column(db.Integer, nullable=True)
+    distance_km = db.Column(db.Float, nullable=True)  # prejdená vzdialenosť
+    
+    # Štatistiky rýchlosti
+    avg_speed = db.Column(db.Float, nullable=True)
+    max_speed = db.Column(db.Integer, nullable=True)
+    
+    # Štatistiky otáčok
+    avg_rpm = db.Column(db.Float, nullable=True)
+    max_rpm = db.Column(db.Integer, nullable=True)
+    min_rpm = db.Column(db.Integer, nullable=True)
+    
+    # Štatistiky spotreby
+    avg_consumption_l100km = db.Column(db.Float, nullable=True)
+    total_fuel_used_l = db.Column(db.Float, nullable=True)  # celková spotreba v litroch
+    
+    # Teploty
+    avg_coolant_temp = db.Column(db.Float, nullable=True)
+    max_coolant_temp = db.Column(db.Integer, nullable=True)
+    avg_oil_temp = db.Column(db.Float, nullable=True)
+    max_oil_temp = db.Column(db.Integer, nullable=True)
+    
+    # Stav motora
+    engine_starts = db.Column(db.Integer, default=1)  # počet štartov v tejto jazde
+    
+    # Či je jazda dokončená
+    is_completed = db.Column(db.Boolean, default=False)
+    
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+
 class DTCCodeHistory(db.Model):
     __tablename__ = "dtc_codes_history"
     id = db.Column(db.Integer, primary_key=True)
@@ -295,6 +341,9 @@ class VehicleTelemetryHistory(db.Model):
     id = db.Column(db.Integer, primary_key=True)
     vehicle_id = db.Column(db.Integer, db.ForeignKey("vehicles.id"), nullable=False, index=True)
     vehicle = db.relationship("Vehicle", backref=db.backref("telemetry_history", lazy="dynamic"))
+        # ✅ PRIDAJ TENTO RIADOK
+    trip_id = db.Column(db.Integer, db.ForeignKey("trips.id"), nullable=True, index=True)
+    trip = db.relationship("Trip", backref=db.backref("telemetry_samples", lazy="dynamic"))
     
     odometer = db.Column(db.Integer, nullable=True)
     battery_voltage = db.Column(db.Float, nullable=True)
@@ -427,8 +476,105 @@ def _telemetry_payload(device_id: int, payload: dict) -> dict:
         "speed": payload.get("speed"),
         "timestamp": payload.get("timestamp") or _iso(datetime.utcnow()),
     }
+
+@app.route("/api/vehicle/<string:vin>/trips", methods=["GET"])
+@jwt_required()
+def get_vehicle_trips(vin):
+    """
+    Získanie všetkých jázd pre konkrétne vozidlo
+    ---
+    tags:
+      - Trips
+    security:
+      - bearerAuth: []
+    parameters:
+      - in: path
+        name: vin
+        required: true
+        type: string
+    responses:
+      200:
+        description: Zoznam jázd
+    """
+    try:
+        user_id = int(get_jwt_identity())
+        user = User.query.get(user_id)
+        if not user:
+            return jsonify({"error": "User not found"}), 404
+
+        # Skontroluj či vozidlo patrí používateľovi
+        vehicle = Vehicle.query.filter_by(vin=vin.upper()).first()
+        if not vehicle:
+            return jsonify({"error": "Vehicle not found"}), 404
+            
+        user_vehicle = UserVehicle.query.filter_by(
+            user_id=user_id, 
+            vehicle_id=vehicle.id
+        ).first()
+        
+        if not user_vehicle and user.role != "admin":
+            return jsonify({"error": "Vehicle not owned by user"}), 403
+
+        # Získaj všetky dokončené jazdy pre toto vozidlo
+        trips = Trip.query.filter_by(
+            vehicle_id=vehicle.id, 
+            is_completed=True
+        ).order_by(Trip.start_time.desc()).all()
+        
+        # Priprav odpoveď
+        trips_data = []
+        for trip in trips:
+            # Zisti priemernú spotrebu z histórie ak nie je vypočítaná
+            if not trip.avg_consumption_l100km and trip.samples_count > 0:
+                consumptions = db.session.query(
+                    func.avg(VehicleTelemetryHistory.consumption_l100km)
+                ).filter(
+                    VehicleTelemetryHistory.trip_id == trip.id,
+                    VehicleTelemetryHistory.consumption_l100km.isnot(None)
+                ).scalar()
+                trip.avg_consumption_l100km = consumptions
+            
+            trips_data.append({
+                "id": trip.id,
+                "start_time": _iso(trip.start_time),
+                "end_time": _iso(trip.end_time),
+                "duration_seconds": trip.duration_seconds,
+                "samples_count": trip.samples_count,
+                "distance_km": round(trip.distance_km, 1) if trip.distance_km else None,
+                "avg_speed": round(trip.avg_speed, 1) if trip.avg_speed else None,
+                "max_speed": trip.max_speed,
+                "avg_rpm": round(trip.avg_rpm) if trip.avg_rpm else None,
+                "max_rpm": trip.max_rpm,
+                "min_rpm": trip.min_rpm,
+                "avg_consumption_l100km": round(trip.avg_consumption_l100km, 1) if trip.avg_consumption_l100km else None,
+                "total_fuel_used_l": round(trip.total_fuel_used_l, 2) if trip.total_fuel_used_l else None,
+                "avg_coolant_temp": round(trip.avg_coolant_temp) if trip.avg_coolant_temp else None,
+                "max_coolant_temp": trip.max_coolant_temp,
+                "avg_oil_temp": round(trip.avg_oil_temp) if trip.avg_oil_temp else None,
+                "max_oil_temp": trip.max_oil_temp,
+                "engine_starts": trip.engine_starts,
+                "start_odometer": trip.start_odometer,
+                "end_odometer": trip.end_odometer
+            })
+
+        return jsonify({
+            "status": "success",
+            "vin": vin,
+            "vehicle": {
+                "brand": vehicle.brand,
+                "model": vehicle.model,
+                "year": vehicle.year
+            },
+            "trips": trips_data,
+            "total_trips": len(trips_data)
+        }), 200
+
+    except Exception as e:
+        print("❌ GET VEHICLE TRIPS ERROR:", e)
+        return jsonify({"error": str(e)}), 500
+
 def _save_telemetry_to_db(device_id: int, t: dict) -> None:
-    """Uloží telemetriu do DB - live (posledná) + history (všetky)"""
+    """Uloží telemetriu do DB - live (posledná) + history (všetky) + trip detection"""
     try:
         device_vehicle = DeviceVehicle.query.filter_by(device_id=device_id).first()
         if not device_vehicle or not device_vehicle.last_vin_id:
@@ -440,6 +586,34 @@ def _save_telemetry_to_db(device_id: int, t: dict) -> None:
         battery = t.get("battery") or {}
         engine = t.get("engine") or {}
         fuel = t.get("fuel") or {}
+        
+        # Detekcia jazdy podľa stavu motora
+        engine_running = engine.get("running")
+        
+        # Získať aktuálnu aktívnu jazdu pre toto vozidlo
+        active_trip = Trip.query.filter_by(
+            vehicle_id=vehicle_id, 
+            is_completed=False
+        ).first()
+        
+        current_time = datetime.utcnow()
+        
+        # Ak motor práve naštartoval (predchádzajúci stav nebol running, teraz je running)
+        if engine_running and not active_trip:
+            # Vytvor novú jazdu
+            active_trip = Trip(
+                vehicle_id=vehicle_id,
+                start_time=current_time,
+                start_odometer=t.get("odometer"),
+                engine_starts=1,
+                is_completed=False
+            )
+            db.session.add(active_trip)
+            db.session.flush()  # Získa ID bez commitu
+            print(f"✅ New trip started for vehicle {vehicle_id} at {current_time}")
+        
+        # trip_id pre history záznam
+        trip_id = active_trip.id if active_trip else None
 
         # 1️⃣ ULOŽ DO HISTORY (každý packet)
         history_row = VehicleTelemetryHistory(
@@ -447,7 +621,7 @@ def _save_telemetry_to_db(device_id: int, t: dict) -> None:
             odometer=t.get("odometer"),
             battery_voltage=battery.get("battery_voltage"),
             battery_health=battery.get("health"),
-            engine_running=engine.get("running"),
+            engine_running=engine_running,
             engine_rpm=engine.get("rpm"),
             engine_load=engine.get("load"),
             coolant_temp=engine.get("coolant_temp"),
@@ -458,9 +632,101 @@ def _save_telemetry_to_db(device_id: int, t: dict) -> None:
             maf=fuel.get("maf"),
             fuel_type=fuel.get("type"),
             speed=t.get("speed"),
-            created_at=datetime.utcnow(),
+            created_at=current_time,
+            trip_id=trip_id  # Priradíme trip_id
         )
         db.session.add(history_row)
+        
+        # Aktualizuj štatistiky aktívnej jazdy
+        if active_trip:
+            # Základné počítadlá
+            active_trip.samples_count += 1
+            active_trip.end_time = current_time
+            
+            # Odometer a vzdialenosť
+            current_odometer = t.get("odometer")
+            if current_odometer:
+                if active_trip.start_odometer is None:
+                    active_trip.start_odometer = current_odometer
+                active_trip.end_odometer = current_odometer
+                if active_trip.start_odometer and active_trip.end_odometer:
+                    active_trip.distance_km = (active_trip.end_odometer - active_trip.start_odometer) / 1000.0
+            
+            # Rýchlosť
+            current_speed = t.get("speed")
+            if current_speed is not None:
+                if active_trip.max_speed is None or current_speed > active_trip.max_speed:
+                    active_trip.max_speed = current_speed
+                # Pre priemer budeme počítať až na konci
+            
+            # Otáčky
+            current_rpm = engine.get("rpm")
+            if current_rpm:
+                if active_trip.max_rpm is None or current_rpm > active_trip.max_rpm:
+                    active_trip.max_rpm = current_rpm
+                if active_trip.min_rpm is None or current_rpm < active_trip.min_rpm:
+                    active_trip.min_rpm = current_rpm
+            
+            # Teploty
+            current_coolant = engine.get("coolant_temp")
+            if current_coolant:
+                if active_trip.max_coolant_temp is None or current_coolant > active_trip.max_coolant_temp:
+                    active_trip.max_coolant_temp = current_coolant
+            
+            current_oil = engine.get("oil_temp")
+            if current_oil:
+                if active_trip.max_oil_temp is None or current_oil > active_trip.max_oil_temp:
+                    active_trip.max_oil_temp = current_oil
+            
+            # Spotreba (ak máme consumption_l100km, môžeme počítať)
+            current_consumption = fuel.get("consumption_l100km")
+            if current_consumption:
+                # Pre priemer budeme počítať až na konci
+            
+            # Trvanie
+            if active_trip.start_time:
+                delta = current_time - active_trip.start_time
+                active_trip.duration_seconds = int(delta.total_seconds())
+        
+        # Ak motor práve zastavil (bežal a teraz nebeží)
+        if not engine_running and active_trip:
+            # Vypočítaj priemery pred ukončením
+            # Získaj všetky záznamy z tejto jazdy
+            trip_samples = VehicleTelemetryHistory.query.filter_by(trip_id=active_trip.id).all()
+            
+            if trip_samples:
+                # Priemerná rýchlosť (len keď speed > 0)
+                speeds = [s.speed for s in trip_samples if s.speed and s.speed > 0]
+                if speeds:
+                    active_trip.avg_speed = sum(speeds) / len(speeds)
+                
+                # Priemerné otáčky
+                rpms = [s.engine_rpm for s in trip_samples if s.engine_rpm]
+                if rpms:
+                    active_trip.avg_rpm = sum(rpms) / len(rpms)
+                
+                # Priemerná spotreba
+                consumptions = [s.consumption_l100km for s in trip_samples if s.consumption_l100km]
+                if consumptions:
+                    active_trip.avg_consumption_l100km = sum(consumptions) / len(consumptions)
+                
+                # Priemerné teploty
+                coolants = [s.coolant_temp for s in trip_samples if s.coolant_temp]
+                if coolants:
+                    active_trip.avg_coolant_temp = sum(coolants) / len(coolants)
+                
+                oils = [s.oil_temp for s in trip_samples if s.oil_temp]
+                if oils:
+                    active_trip.avg_oil_temp = sum(oils) / len(oils)
+                
+                # Celková spotreba v litroch (približne)
+                # consumption_l100km je spotreba na 100km, prepočet na litre podľa vzdialenosti
+                if active_trip.distance_km and active_trip.avg_consumption_l100km:
+                    active_trip.total_fuel_used_l = (active_trip.distance_km / 100) * active_trip.avg_consumption_l100km
+            
+            # Ukonči jazdu
+            active_trip.is_completed = True
+            print(f"✅ Trip completed for vehicle {vehicle_id}, duration: {active_trip.duration_seconds}s")
 
         # 2️⃣ ULOŽ DO LIVE (posledný packet) - UPDATE alebo INSERT
         live_row = VehicleTelemetryLive.query.filter_by(vehicle_id=vehicle_id).first()
@@ -469,7 +735,7 @@ def _save_telemetry_to_db(device_id: int, t: dict) -> None:
             live_row.odometer = t.get("odometer")
             live_row.battery_voltage = battery.get("battery_voltage")
             live_row.battery_health = battery.get("health")
-            live_row.engine_running = engine.get("running")
+            live_row.engine_running = engine_running
             live_row.engine_rpm = engine.get("rpm")
             live_row.engine_load = engine.get("load")
             live_row.coolant_temp = engine.get("coolant_temp")
@@ -480,7 +746,7 @@ def _save_telemetry_to_db(device_id: int, t: dict) -> None:
             live_row.maf = fuel.get("maf")
             live_row.fuel_type = fuel.get("type")
             live_row.speed = t.get("speed")
-            live_row.created_at = datetime.utcnow()
+            live_row.created_at = current_time
         else:
             # Nový záznam
             live_row = VehicleTelemetryLive(
@@ -488,7 +754,7 @@ def _save_telemetry_to_db(device_id: int, t: dict) -> None:
                 odometer=t.get("odometer"),
                 battery_voltage=battery.get("battery_voltage"),
                 battery_health=battery.get("health"),
-                engine_running=engine.get("running"),
+                engine_running=engine_running,
                 engine_rpm=engine.get("rpm"),
                 engine_load=engine.get("load"),
                 coolant_temp=engine.get("coolant_temp"),
@@ -503,12 +769,11 @@ def _save_telemetry_to_db(device_id: int, t: dict) -> None:
             db.session.add(live_row)
 
         db.session.commit()
-        print(f"✅ Telemetry saved for vehicle_id: {vehicle_id} (live + history)")
+        print(f"✅ Telemetry saved for vehicle_id: {vehicle_id} (live + history) with trip_id: {trip_id}")
         
     except Exception as e:
         db.session.rollback()
-        print(f"❌ Error saving telemetry: {e}")# =========================
-# ✅ NEW: SOCKET.IO EVENTS
+        print(f"❌ Error saving telemetry: {e}")# ✅ NEW: SOCKET.IO EVENTS
 # =========================
 @socketio.on("connect")
 def ws_connect():
