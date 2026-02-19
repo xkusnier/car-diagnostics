@@ -841,6 +841,76 @@ def clear_device_dtcs(device_id):
         print("❌ CLEAR DEVICE DTCS ERROR:", e)
         return jsonify({"error": str(e)}), 500
 
+@app.route("/api/user-vehicle/<string:vin>", methods=["DELETE"])
+@jwt_required()
+def delete_user_vehicle(vin):
+    """
+    Vymazanie vzťahu medzi používateľom a vozidlom
+    ---
+    tags:
+      - Vehicles
+    security:
+      - bearerAuth: []
+    description: |
+        Vymaže záznam z tabuľky user_vehicles pre prihláseného používateľa a dané VIN.
+        Tým sa vozidlo odstráni zo zoznamu vozidiel používateľa.
+    parameters:
+      - in: path
+        name: vin
+        required: true
+        type: string
+        description: VIN číslo vozidla
+    responses:
+      200:
+        description: Vozidlo úspešne odstránené
+        schema:
+          type: object
+          properties:
+            status:
+              type: string
+              example: "success"
+            message:
+              type: string
+      404:
+        description: Vozidlo neexistuje alebo nie je priradené používateľovi
+      500:
+        description: Server error
+    """
+    try:
+        user_id = int(get_jwt_identity())
+        user = User.query.get(user_id)
+        if not user:
+            return jsonify({"error": "User not found"}), 404
+
+        # Nájsť vozidlo podľa VIN
+        vehicle = Vehicle.query.filter_by(vin=vin.upper()).first()
+        if not vehicle:
+            return jsonify({"error": "Vehicle not found"}), 404
+
+        # Nájsť a vymazať záznam v user_vehicles
+        user_vehicle = UserVehicle.query.filter_by(
+            user_id=user_id,
+            vehicle_id=vehicle.id
+        ).first()
+
+        if not user_vehicle:
+            return jsonify({"error": "Vehicle not associated with this user"}), 404
+
+        db.session.delete(user_vehicle)
+        db.session.commit()
+
+        return jsonify({
+            "status": "success",
+            "message": f"Vehicle {vin} removed from your list"
+        }), 200
+
+    except Exception as e:
+        db.session.rollback()
+        print("❌ DELETE USER VEHICLE ERROR:", e)
+        return jsonify({"error": str(e)}), 500
+
+
+
 @app.route("/api/device/<int:device_id>/read-dtcs", methods=["POST"])
 @jwt_required()
 def read_device_dtcs(device_id):
