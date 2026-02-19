@@ -53,7 +53,7 @@ def log_request_info():
 
 @app.after_request
 def after_request(response):
-    response.headers.add('Access-Control-Allow-Origin', '*')
+    # ✅ ODSTRÁŇ TENTO RIADOK: response.headers.add('Access-Control-Allow-Origin', '*')
     response.headers.add('Access-Control-Allow-Headers', 'Content-Type,Authorization')
     response.headers.add('Access-Control-Allow-Methods', 'GET,PUT,POST,DELETE,OPTIONS')
     return response
@@ -341,7 +341,7 @@ class VehicleTelemetryHistory(db.Model):
     id = db.Column(db.Integer, primary_key=True)
     vehicle_id = db.Column(db.Integer, db.ForeignKey("vehicles.id"), nullable=False, index=True)
     vehicle = db.relationship("Vehicle", backref=db.backref("telemetry_history", lazy="dynamic"))
-        # ✅ PRIDAJ TENTO RIADOK
+    
     trip_id = db.Column(db.Integer, db.ForeignKey("trips.id"), nullable=True, index=True)
     trip = db.relationship("Trip", backref=db.backref("telemetry_samples", lazy="dynamic"))
     
@@ -682,7 +682,7 @@ def _save_telemetry_to_db(device_id: int, t: dict) -> None:
             current_consumption = fuel.get("consumption_l100km")
             if current_consumption:
                 # Pre priemer budeme počítať až na konci
-            
+                pass
             # Trvanie
             if active_trip.start_time:
                 delta = current_time - active_trip.start_time
