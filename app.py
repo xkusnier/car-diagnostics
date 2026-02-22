@@ -364,6 +364,13 @@ class VehicleTelemetryHistory(db.Model):
 # =========================
 # INIT / HEALTH
 # =========================
+@app.route("/api/health", methods=["GET"])
+def health_check():
+    """
+    Jednoduchý health check endpoint na prebúdzanie servera
+    """
+    return jsonify({"status": "ok"}), 200
+
 @app.route("/init-db")
 def init_db():
     """
