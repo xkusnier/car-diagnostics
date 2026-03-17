@@ -151,6 +151,7 @@ db = SQLAlchemy(app)
 class User(db.Model):
     __tablename__ = "users"
     id = db.Column(db.Integer, primary_key=True)
+    username = db.Column(db.String(80), unique=True, nullable=False)
     password = db.Column(db.String(255), nullable=False)
     role = db.Column(db.String(50), default="user")
     email = db.Column(db.String(120), unique=True, nullable=False)
@@ -1949,12 +1950,13 @@ def login():
         return jsonify({
             "status": "success",
             "access_token": access_token,
-            "role": user.role
+            "role": user.role,
+            "username": user.username
         }), 200
 
     except Exception as e:
         return jsonify({"error": str(e)}), 500
-
+        
 @app.route("/api/register", methods=["POST"])
 def register():
     """
@@ -2017,24 +2019,35 @@ def register():
     """
     try:
         data = request.get_json()
+        username = data.get("username")
         email = data.get("email")
         password = data.get("password")
 
-        if not email or not password:
-            return jsonify({"error": "Missing email or password"}), 400
+        if not username or not email or not password:
+            return jsonify({"error": "Missing username, email or password"}), 400
+
+        username = username.strip()
+
+        if len(username) < 3:
+            return jsonify({"error": "Username must be at least 3 characters long"}), 400
 
         if User.query.filter_by(email=email).first():
             return jsonify({"error": "Email already exists"}), 409
 
-        new_user = User(email=email, password=password, role="user")
+        if User.query.filter_by(username=username).first():
+            return jsonify({"error": "Username already exists"}), 409
+
+        new_user = User(username=username, email=email, password=password, role="user")
         db.session.add(new_user)
         db.session.commit()
 
-        return jsonify({"status": "success", "message": "User registered"}), 201
+        return jsonify({
+            "status": "success",
+            "message": "User registered"
+        }), 201
     except Exception as e:
         db.session.rollback()
         return jsonify({"error": str(e)}), 500
-
 # =========================
 # LOAD DTC CSV
 # =========================
