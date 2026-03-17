@@ -484,6 +484,108 @@ def _telemetry_payload(device_id: int, payload: dict) -> dict:
         "timestamp": payload.get("timestamp") or _iso(datetime.utcnow()),
     }
 
+@app.route("/api/dashboard-summary", methods=["GET"])
+@jwt_required()
+def dashboard_summary():
+    """
+    Domovská stránka - súhrn používateľských dát a vozidlá s aktívnymi chybami
+    ---
+    tags:
+      - Dashboard
+    security:
+      - bearerAuth: []
+    responses:
+      200:
+        description: Dashboard summary
+    """
+    try:
+        user_id = int(get_jwt_identity())
+        user = User.query.get(user_id)
+
+        if not user:
+            return jsonify({"error": "User not found"}), 404
+
+        # Devices
+        if user.role == "admin":
+            devices = Device.query.all()
+        else:
+            devices = Device.query.filter_by(user_id=user_id).all()
+
+        total_devices = len(devices)
+
+        # Vehicles
+        if user.role == "admin":
+            user_vehicles = Vehicle.query.all()
+        else:
+            user_vehicles = (
+                db.session.query(Vehicle)
+                .join(UserVehicle, UserVehicle.vehicle_id == Vehicle.id)
+                .filter(UserVehicle.user_id == user_id)
+                .all()
+            )
+
+        total_vehicles = len(user_vehicles)
+        vehicle_ids = [v.id for v in user_vehicles]
+
+        active_dtcs_count = 0
+        vehicles_with_issues = []
+
+        if vehicle_ids:
+            active_dtcs_count = (
+                DTCCodeActive.query
+                .filter(DTCCodeActive.vin_id.in_(vehicle_ids))
+                .count()
+            )
+
+            dtc_counts = (
+                db.session.query(
+                    DTCCodeActive.vin_id,
+                    func.count(DTCCodeActive.id).label("dtc_count")
+                )
+                .filter(DTCCodeActive.vin_id.in_(vehicle_ids))
+                .group_by(DTCCodeActive.vin_id)
+                .all()
+            )
+
+            dtc_count_map = {row.vin_id: row.dtc_count for row in dtc_counts}
+
+            for vehicle in user_vehicles:
+                dtc_count = dtc_count_map.get(vehicle.id, 0)
+                if dtc_count <= 0:
+                    continue
+
+                device_link = DeviceVehicle.query.filter_by(last_vin_id=vehicle.id).first()
+                linked_device = Device.query.get(device_link.device_id) if device_link else None
+
+                vehicles_with_issues.append({
+                    "vehicle_id": vehicle.id,
+                    "vin": vehicle.vin,
+                    "brand": vehicle.brand,
+                    "model": vehicle.model,
+                    "year": vehicle.year,
+                    "engine": vehicle.engine,
+                    "dtc_count": dtc_count,
+                    "device_id": linked_device.id if linked_device else None,
+                    "online": linked_device.status if linked_device else False
+                })
+
+        vehicles_with_issues.sort(key=lambda x: x["dtc_count"], reverse=True)
+
+        return jsonify({
+            "status": "success",
+            "summary": {
+                "total_devices": total_devices,
+                "total_vehicles": total_vehicles,
+                "active_dtcs": active_dtcs_count,
+                "vehicles_with_issues": len(vehicles_with_issues)
+            },
+            "vehicles_with_issues_list": vehicles_with_issues
+        }), 200
+
+    except Exception as e:
+        print("❌ DASHBOARD SUMMARY ERROR:", e)
+        return jsonify({"error": str(e)}), 500
+
 @app.route("/api/vehicle/<string:vin>/trips", methods=["GET"])
 @jwt_required()
 def get_vehicle_trips(vin):
