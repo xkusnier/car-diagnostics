@@ -1936,13 +1936,21 @@ def login():
     """
     try:
         data = request.get_json()
-        email = data.get("email")
+        identifier = data.get("identifier")
         password = data.get("password")
 
-        if not email or not password:
-            return jsonify({"error": "Missing email or password"}), 400
+        if not identifier or not password:
+            return jsonify({"error": "Missing identifier or password"}), 400
 
-        user = User.query.filter_by(email=email).first()
+        identifier = identifier.strip()
+
+        user = User.query.filter(
+            or_(
+                func.lower(User.email) == identifier.lower(),
+                func.lower(User.username) == identifier.lower()
+            )
+        ).first()
+
         if not user or user.password != password:
             return jsonify({"error": "Invalid credentials"}), 401
 
@@ -1951,7 +1959,8 @@ def login():
             "status": "success",
             "access_token": access_token,
             "role": user.role,
-            "username": user.username
+            "username": user.username,
+            "email": user.email
         }), 200
 
     except Exception as e:
