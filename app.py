@@ -335,7 +335,34 @@ class VehicleTelemetryLive(db.Model):
     fuel_type = db.Column(db.String(20), nullable=True)
     speed = db.Column(db.Integer, nullable=True)
     created_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    
+class DrivingEvent(db.Model):
+    __tablename__ = "driving_events"
 
+    id = db.Column(db.Integer, primary_key=True)
+    device_id = db.Column(db.Integer, db.ForeignKey("device.id"), nullable=False, index=True)
+    vehicle_id = db.Column(db.Integer, db.ForeignKey("vehicles.id"), nullable=True, index=True)
+
+    event_type = db.Column(db.String(50), nullable=False, index=True)  # HARD_BRAKE, SHARP_ACCELERATION, HARD_TURN, CRASH
+    severity = db.Column(db.String(20), nullable=False, default="medium")
+
+    event_timestamp = db.Column(db.DateTime, nullable=False, index=True)
+    speed_kmh = db.Column(db.Float, nullable=True)
+    g_force = db.Column(db.Float, nullable=True)
+
+    accel_x = db.Column(db.Float, nullable=True)
+    accel_y = db.Column(db.Float, nullable=True)
+    accel_z = db.Column(db.Float, nullable=True)
+
+    gyro_x = db.Column(db.Float, nullable=True)
+    gyro_y = db.Column(db.Float, nullable=True)
+    gyro_z = db.Column(db.Float, nullable=True)
+
+    created_at = db.Column(db.DateTime, default=datetime.utcnow, index=True)
+
+    device = db.relationship("Device", backref=db.backref("driving_events", lazy="dynamic"))
+    vehicle = db.relationship("Vehicle", backref=db.backref("driving_events", lazy="dynamic"))
+    
 class VehicleTelemetryHistory(db.Model):
     __tablename__ = "vehicle_telemetry_history"
     id = db.Column(db.Integer, primary_key=True)
@@ -360,6 +387,491 @@ class VehicleTelemetryHistory(db.Model):
     fuel_type = db.Column(db.String(20), nullable=True)
     speed = db.Column(db.Integer, nullable=True)
     created_at = db.Column(db.DateTime, default=datetime.utcnow, index=True)
+class DrivingEvent(db.Model):
+    __tablename__ = "driving_events"
+
+    id = db.Column(db.Integer, primary_key=True)
+    device_id = db.Column(db.Integer, db.ForeignKey("device.id"), nullable=False, index=True)
+    vehicle_id = db.Column(db.Integer, db.ForeignKey("vehicles.id"), nullable=True, index=True)
+
+    event_type = db.Column(db.String(50), nullable=False, index=True)  # HARD_BRAKE, SHARP_ACCELERATION, HARD_TURN, CRASH
+    severity = db.Column(db.String(20), nullable=False, default="medium")
+
+    event_timestamp = db.Column(db.DateTime, nullable=False, index=True)
+    speed_kmh = db.Column(db.Float, nullable=True)
+    g_force = db.Column(db.Float, nullable=True)
+
+    accel_x = db.Column(db.Float, nullable=True)
+    accel_y = db.Column(db.Float, nullable=True)
+    accel_z = db.Column(db.Float, nullable=True)
+
+    gyro_x = db.Column(db.Float, nullable=True)
+    gyro_y = db.Column(db.Float, nullable=True)
+    gyro_z = db.Column(db.Float, nullable=True)
+
+    created_at = db.Column(db.DateTime, default=datetime.utcnow, index=True)
+
+    device = db.relationship("Device", backref=db.backref("driving_events", lazy="dynamic"))
+    vehicle = db.relationship("Vehicle", backref=db.backref("driving_events", lazy="dynamic"))
+
+
+ALLOWED_DRIVING_EVENT_TYPES = {
+    "HARD_BRAKE",
+    "SHARP_ACCELERATION",
+    "HARD_TURN",
+    "CRASH",
+}
+
+
+def detect_event_severity(event_type: str, g_force: float | None) -> str:
+    event_type = (event_type or "").upper()
+
+    if event_type == "CRASH":
+        return "critical"
+
+    if g_force is None:
+        if event_type in {"HARD_BRAKE", "SHARP_ACCELERATION", "HARD_TURN"}:
+            return "medium"
+        return "low"
+
+    if g_force >= 1.2:
+        return "critical"
+    if g_force >= 0.8:
+        return "high"
+    if g_force >= 0.5:
+        return "medium"
+    return "low"
+
+
+def serialize_driving_event(event: DrivingEvent) -> dict:
+    return {
+        "id": event.id,
+        "device_id": event.device_id,
+        "vehicle_id": event.vehicle_id,
+        "vin": event.vehicle.vin if event.vehicle else None,
+        "event_type": event.event_type,
+        "severity": event.severity,
+        "event_timestamp": _iso(event.event_timestamp),
+        "speed_kmh": event.speed_kmh,
+        "g_force": event.g_force,
+        "accel": {
+            "x": event.accel_x,
+            "y": event.accel_y,
+            "z": event.accel_z,
+        },
+        "gyro": {
+            "x": event.gyro_x,
+            "y": event.gyro_y,
+            "z": event.gyro_z,
+        },
+        "created_at": _iso(event.created_at),
+    }
+
+
+@app.route("/api/driving-event", methods=["POST"])
+def receive_driving_event():
+    """
+    Príjem jazdných udalostí z RPi / gyroskopu / akcelerometra
+    ---
+    tags:
+      - Driving Events
+    description: |
+      Endpoint na uloženie jazdných udalostí ako:
+      - HARD_BRAKE
+      - SHARP_ACCELERATION
+      - HARD_TURN
+      - CRASH
+
+      Dáta môžu obsahovať VIN priamo, alebo sa vozidlo dohľadá podľa device_id.
+
+      **Príklad requestu:**
+      ```json
+      {
+        "device_id": 12345,
+        "vin": "WF0XXXXX12345678",
+        "event_type": "HARD_BRAKE",
+        "timestamp": 1710500000.123,
+        "g_force": 0.72,
+        "speed_kmh": 85,
+        "accel": {
+          "x": -7.06,
+          "y": 0.12,
+          "z": 9.81
+        },
+        "gyro": {
+          "x": 0.5,
+          "y": -0.3,
+          "z": 0.1
+        }
+      }
+      ```
+
+      **Správanie:**
+      - `device_id` je povinné
+      - `event_type` je povinné
+      - `timestamp` je Unix timestamp v sekundách
+      - ak `vin` nepríde, backend skúsi nájsť vehicle cez `device_vehicle.last_vin_id`
+
+      **Očakávaná odpoveď:**
+      ```json
+      {
+        "status": "success",
+        "message": "Driving event stored",
+        "event": {
+          "id": 1,
+          "device_id": 12345,
+          "vehicle_id": 5,
+          "vin": "WF0XXXXX12345678",
+          "event_type": "HARD_BRAKE",
+          "severity": "medium",
+          "event_timestamp": "2024-03-15T10:13:20Z",
+          "speed_kmh": 85.0,
+          "g_force": 0.72,
+          "accel": {
+            "x": -7.06,
+            "y": 0.12,
+            "z": 9.81
+          },
+          "gyro": {
+            "x": 0.5,
+            "y": -0.3,
+            "z": 0.1
+          },
+          "created_at": "2024-03-15T10:13:21Z"
+        }
+      }
+      ```
+    parameters:
+      - in: body
+        name: body
+        required: true
+        schema:
+          type: object
+          required:
+            - device_id
+            - event_type
+          properties:
+            device_id:
+              type: integer
+              example: 12345
+            vin:
+              type: string
+              example: "WF0XXXXX12345678"
+            event_type:
+              type: string
+              enum: [HARD_BRAKE, SHARP_ACCELERATION, HARD_TURN, CRASH]
+              example: "HARD_BRAKE"
+            timestamp:
+              type: number
+              example: 1710500000.123
+            g_force:
+              type: number
+              example: 0.72
+            speed_kmh:
+              type: number
+              example: 85
+            accel:
+              type: object
+              properties:
+                x:
+                  type: number
+                  example: -7.06
+                y:
+                  type: number
+                  example: 0.12
+                z:
+                  type: number
+                  example: 9.81
+            gyro:
+              type: object
+              properties:
+                x:
+                  type: number
+                  example: 0.5
+                y:
+                  type: number
+                  example: -0.3
+                z:
+                  type: number
+                  example: 0.1
+    responses:
+      201:
+        description: Event úspešne uložený
+      400:
+        description: Chýbajúce alebo neplatné dáta
+      404:
+        description: Device alebo vehicle neexistuje
+      500:
+        description: Server error
+    """
+    try:
+        payload = request.get_json()
+
+        device_id_raw = payload.get("device_id")
+        vin = payload.get("vin")
+        event_type = str(payload.get("event_type") or "").upper().strip()
+        timestamp_raw = payload.get("timestamp")
+        g_force = payload.get("g_force")
+        speed_kmh = payload.get("speed_kmh")
+
+        accel = payload.get("accel") or {}
+        gyro = payload.get("gyro") or {}
+
+        try:
+            device_id = int(device_id_raw)
+        except (TypeError, ValueError):
+            return jsonify({"error": "device_id must be an integer"}), 400
+
+        if not event_type:
+            return jsonify({"error": "Missing event_type"}), 400
+
+        if event_type not in ALLOWED_DRIVING_EVENT_TYPES:
+            return jsonify({
+                "error": "Invalid event_type",
+                "allowed": sorted(list(ALLOWED_DRIVING_EVENT_TYPES))
+            }), 400
+
+        device = Device.query.get(device_id)
+        if not device:
+            return jsonify({"error": f"Device {device_id} not found"}), 404
+
+        vehicle = None
+
+        if vin:
+            vehicle = Vehicle.query.filter_by(vin=vin.strip().upper()).first()
+            if not vehicle:
+                return jsonify({"error": "Vehicle not found for provided VIN"}), 404
+        else:
+            state = DeviceVehicle.query.filter_by(device_id=device_id).first()
+            if state and state.last_vin_id:
+                vehicle = Vehicle.query.get(state.last_vin_id)
+
+        if timestamp_raw is None:
+            event_timestamp = datetime.utcnow()
+        else:
+            try:
+                event_timestamp = datetime.utcfromtimestamp(float(timestamp_raw))
+            except (TypeError, ValueError):
+                return jsonify({"error": "timestamp must be unix timestamp in seconds"}), 400
+
+        try:
+            g_force_val = float(g_force) if g_force is not None else None
+        except (TypeError, ValueError):
+            return jsonify({"error": "g_force must be a number"}), 400
+
+        try:
+            speed_kmh_val = float(speed_kmh) if speed_kmh is not None else None
+        except (TypeError, ValueError):
+            return jsonify({"error": "speed_kmh must be a number"}), 400
+
+        def _to_float(v):
+            if v is None:
+                return None
+            return float(v)
+
+        severity = detect_event_severity(event_type, g_force_val)
+
+        new_event = DrivingEvent(
+            device_id=device_id,
+            vehicle_id=vehicle.id if vehicle else None,
+            event_type=event_type,
+            severity=severity,
+            event_timestamp=event_timestamp,
+            speed_kmh=speed_kmh_val,
+            g_force=g_force_val,
+            accel_x=_to_float(accel.get("x")),
+            accel_y=_to_float(accel.get("y")),
+            accel_z=_to_float(accel.get("z")),
+            gyro_x=_to_float(gyro.get("x")),
+            gyro_y=_to_float(gyro.get("y")),
+            gyro_z=_to_float(gyro.get("z")),
+        )
+
+        db.session.add(new_event)
+        device.status = True
+        db.session.commit()
+
+        event_payload = serialize_driving_event(new_event)
+
+        socketio.emit("driving_event", event_payload, room=f"device:{device_id}")
+
+        return jsonify({
+            "status": "success",
+            "message": "Driving event stored",
+            "event": event_payload
+        }), 201
+
+    except Exception as e:
+        db.session.rollback()
+        print("❌ DRIVING EVENT ERROR:", e)
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route("/api/device/<int:device_id>/events", methods=["GET"])
+@jwt_required()
+def get_device_events(device_id):
+    """
+    História jazdných udalostí pre konkrétne zariadenie
+    ---
+    tags:
+      - Driving Events
+    security:
+      - bearerAuth: []
+    parameters:
+      - in: path
+        name: device_id
+        required: true
+        type: integer
+      - in: query
+        name: limit
+        required: false
+        type: integer
+        example: 50
+      - in: query
+        name: event_type
+        required: false
+        type: string
+        example: "HARD_BRAKE"
+    responses:
+      200:
+        description: Zoznam udalostí zariadenia
+      404:
+        description: Device neexistuje alebo nepatrí používateľovi
+      500:
+        description: Server error
+    """
+    try:
+        user_id = int(get_jwt_identity())
+        user = User.query.get(user_id)
+        if not user:
+            return jsonify({"error": "User not found"}), 404
+
+        if user.role == "admin":
+            device = Device.query.get(device_id)
+        else:
+            device = Device.query.filter_by(id=device_id, user_id=user_id).first()
+
+        if not device:
+            return jsonify({"error": "Device not found or not owned by user"}), 404
+
+        limit = request.args.get("limit", default=50, type=int)
+        event_type = request.args.get("event_type", default=None, type=str)
+
+        query = DrivingEvent.query.filter_by(device_id=device_id)
+
+        if event_type:
+            query = query.filter(DrivingEvent.event_type == event_type.upper().strip())
+
+        events = (
+            query.order_by(DrivingEvent.event_timestamp.desc())
+            .limit(min(limit, 200))
+            .all()
+        )
+
+        return jsonify({
+            "status": "success",
+            "device_id": device_id,
+            "count": len(events),
+            "events": [serialize_driving_event(e) for e in events]
+        }), 200
+
+    except Exception as e:
+        print("❌ GET DEVICE EVENTS ERROR:", e)
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route("/api/vehicle/<string:vin>/events", methods=["GET"])
+@jwt_required()
+def get_vehicle_events(vin):
+    """
+    História jazdných udalostí pre konkrétne vozidlo podľa VIN
+    ---
+    tags:
+      - Driving Events
+    security:
+      - bearerAuth: []
+    parameters:
+      - in: path
+        name: vin
+        required: true
+        type: string
+      - in: query
+        name: limit
+        required: false
+        type: integer
+        example: 50
+      - in: query
+        name: event_type
+        required: false
+        type: string
+        example: "CRASH"
+    responses:
+      200:
+        description: Zoznam udalostí vozidla
+      403:
+        description: Vozidlo nepatrí používateľovi
+      404:
+        description: Vehicle neexistuje
+      500:
+        description: Server error
+    """
+    try:
+        user_id = int(get_jwt_identity())
+        user = User.query.get(user_id)
+        if not user:
+            return jsonify({"error": "User not found"}), 404
+
+        vehicle = Vehicle.query.filter_by(vin=vin.upper()).first()
+        if not vehicle:
+            return jsonify({"error": "Vehicle not found"}), 404
+
+        if user.role != "admin":
+            user_vehicle = UserVehicle.query.filter_by(
+                user_id=user_id,
+                vehicle_id=vehicle.id
+            ).first()
+
+            if not user_vehicle:
+                return jsonify({"error": "Vehicle not owned by user"}), 403
+
+        limit = request.args.get("limit", default=50, type=int)
+        event_type = request.args.get("event_type", default=None, type=str)
+
+        query = DrivingEvent.query.filter_by(vehicle_id=vehicle.id)
+
+        if event_type:
+            query = query.filter(DrivingEvent.event_type == event_type.upper().strip())
+
+        events = (
+            query.order_by(DrivingEvent.event_timestamp.desc())
+            .limit(min(limit, 200))
+            .all()
+        )
+
+        summary = {
+            "hard_brake": sum(1 for e in events if e.event_type == "HARD_BRAKE"),
+            "sharp_acceleration": sum(1 for e in events if e.event_type == "SHARP_ACCELERATION"),
+            "hard_turn": sum(1 for e in events if e.event_type == "HARD_TURN"),
+            "crash": sum(1 for e in events if e.event_type == "CRASH"),
+        }
+
+        return jsonify({
+            "status": "success",
+            "vin": vehicle.vin,
+            "vehicle": {
+                "brand": vehicle.brand,
+                "model": vehicle.model,
+                "year": vehicle.year
+            },
+            "count": len(events),
+            "summary": summary,
+            "events": [serialize_driving_event(e) for e in events]
+        }), 200
+
+    except Exception as e:
+        print("❌ GET VEHICLE EVENTS ERROR:", e)
+        return jsonify({"error": str(e)}), 500
+
 
 # =========================
 # INIT / HEALTH
