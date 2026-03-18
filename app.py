@@ -336,33 +336,7 @@ class VehicleTelemetryLive(db.Model):
     speed = db.Column(db.Integer, nullable=True)
     created_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
     
-class DrivingEvent(db.Model):
-    __tablename__ = "driving_events"
 
-    id = db.Column(db.Integer, primary_key=True)
-    device_id = db.Column(db.Integer, db.ForeignKey("device.id"), nullable=False, index=True)
-    vehicle_id = db.Column(db.Integer, db.ForeignKey("vehicles.id"), nullable=True, index=True)
-
-    event_type = db.Column(db.String(50), nullable=False, index=True)  # HARD_BRAKE, SHARP_ACCELERATION, HARD_TURN, CRASH
-    severity = db.Column(db.String(20), nullable=False, default="medium")
-
-    event_timestamp = db.Column(db.DateTime, nullable=False, index=True)
-    speed_kmh = db.Column(db.Float, nullable=True)
-    g_force = db.Column(db.Float, nullable=True)
-
-    accel_x = db.Column(db.Float, nullable=True)
-    accel_y = db.Column(db.Float, nullable=True)
-    accel_z = db.Column(db.Float, nullable=True)
-
-    gyro_x = db.Column(db.Float, nullable=True)
-    gyro_y = db.Column(db.Float, nullable=True)
-    gyro_z = db.Column(db.Float, nullable=True)
-
-    created_at = db.Column(db.DateTime, default=datetime.utcnow, index=True)
-
-    device = db.relationship("Device", backref=db.backref("driving_events", lazy="dynamic"))
-    vehicle = db.relationship("Vehicle", backref=db.backref("driving_events", lazy="dynamic"))
-    
 class VehicleTelemetryHistory(db.Model):
     __tablename__ = "vehicle_telemetry_history"
     id = db.Column(db.Integer, primary_key=True)
@@ -394,8 +368,7 @@ class DrivingEvent(db.Model):
     device_id = db.Column(db.Integer, db.ForeignKey("device.id"), nullable=False, index=True)
     vehicle_id = db.Column(db.Integer, db.ForeignKey("vehicles.id"), nullable=True, index=True)
 
-    event_type = db.Column(db.String(50), nullable=False, index=True)  # HARD_BRAKE, SHARP_ACCELERATION, HARD_TURN, CRASH
-    severity = db.Column(db.String(20), nullable=False, default="medium")
+    event_type = db.Column(db.String(50), nullable=False, index=True)
 
     event_timestamp = db.Column(db.DateTime, nullable=False, index=True)
     speed_kmh = db.Column(db.Float, nullable=True)
@@ -423,26 +396,6 @@ ALLOWED_DRIVING_EVENT_TYPES = {
 }
 
 
-def detect_event_severity(event_type: str, g_force: float | None) -> str:
-    event_type = (event_type or "").upper()
-
-    if event_type == "CRASH":
-        return "critical"
-
-    if g_force is None:
-        if event_type in {"HARD_BRAKE", "SHARP_ACCELERATION", "HARD_TURN"}:
-            return "medium"
-        return "low"
-
-    if g_force >= 1.2:
-        return "critical"
-    if g_force >= 0.8:
-        return "high"
-    if g_force >= 0.5:
-        return "medium"
-    return "low"
-
-
 def serialize_driving_event(event: DrivingEvent) -> dict:
     return {
         "id": event.id,
@@ -450,7 +403,6 @@ def serialize_driving_event(event: DrivingEvent) -> dict:
         "vehicle_id": event.vehicle_id,
         "vin": event.vehicle.vin if event.vehicle else None,
         "event_type": event.event_type,
-        "severity": event.severity,
         "event_timestamp": _iso(event.event_timestamp),
         "speed_kmh": event.speed_kmh,
         "g_force": event.g_force,
@@ -502,42 +454,6 @@ def receive_driving_event():
           "x": 0.5,
           "y": -0.3,
           "z": 0.1
-        }
-      }
-      ```
-
-      **Správanie:**
-      - `device_id` je povinné
-      - `event_type` je povinné
-      - `timestamp` je Unix timestamp v sekundách
-      - ak `vin` nepríde, backend skúsi nájsť vehicle cez `device_vehicle.last_vin_id`
-
-      **Očakávaná odpoveď:**
-      ```json
-      {
-        "status": "success",
-        "message": "Driving event stored",
-        "event": {
-          "id": 1,
-          "device_id": 12345,
-          "vehicle_id": 5,
-          "vin": "WF0XXXXX12345678",
-          "event_type": "HARD_BRAKE",
-          "severity": "medium",
-          "event_timestamp": "2024-03-15T10:13:20Z",
-          "speed_kmh": 85.0,
-          "g_force": 0.72,
-          "accel": {
-            "x": -7.06,
-            "y": 0.12,
-            "z": 9.81
-          },
-          "gyro": {
-            "x": 0.5,
-            "y": -0.3,
-            "z": 0.1
-          },
-          "created_at": "2024-03-15T10:13:21Z"
         }
       }
       ```
@@ -669,13 +585,10 @@ def receive_driving_event():
                 return None
             return float(v)
 
-        severity = detect_event_severity(event_type, g_force_val)
-
         new_event = DrivingEvent(
             device_id=device_id,
             vehicle_id=vehicle.id if vehicle else None,
             event_type=event_type,
-            severity=severity,
             event_timestamp=event_timestamp,
             speed_kmh=speed_kmh_val,
             g_force=g_force_val,
@@ -692,7 +605,6 @@ def receive_driving_event():
         db.session.commit()
 
         event_payload = serialize_driving_event(new_event)
-
         socketio.emit("driving_event", event_payload, room=f"device:{device_id}")
 
         return jsonify({
@@ -871,8 +783,6 @@ def get_vehicle_events(vin):
     except Exception as e:
         print("❌ GET VEHICLE EVENTS ERROR:", e)
         return jsonify({"error": str(e)}), 500
-
-
 # =========================
 # INIT / HEALTH
 # =========================
