@@ -13,6 +13,7 @@ from sqlalchemy import func, or_
 # ✅ NEW: WebSocket (Socket.IO)
 from flask_socketio import SocketIO, emit, join_room
 import eventlet
+import re
 eventlet.monkey_patch()
 
 app = Flask(__name__)
@@ -142,6 +143,8 @@ elif db_url.startswith("postgresql://") and "+psycopg" not in db_url:
 app.config["SQLALCHEMY_DATABASE_URI"] = db_url
 app.config["SQLALCHEMY_TRACK_MODIFICATIONS"] = False
 db = SQLAlchemy(app)
+
+
 
 # =========================
 # MODELY DB
@@ -618,6 +621,161 @@ def receive_driving_event():
         print("❌ DRIVING EVENT ERROR:", e)
         return jsonify({"error": str(e)}), 500
 
+VIN_TRANSLITERATION = {
+    "A": 1, "B": 2, "C": 3, "D": 4, "E": 5, "F": 6, "G": 7, "H": 8,
+    "J": 1, "K": 2, "L": 3, "M": 4, "N": 5, "P": 7, "R": 9,
+    "S": 2, "T": 3, "U": 4, "V": 5, "W": 6, "X": 7, "Y": 8, "Z": 9,
+    "0": 0, "1": 1, "2": 2, "3": 3, "4": 4, "5": 5, "6": 6, "7": 7, "8": 8, "9": 9,
+}
+
+VIN_WEIGHTS = [8, 7, 6, 5, 4, 3, 2, 10, 0, 9, 8, 7, 6, 5, 4, 3, 2]
+VIN_ALLOWED_REGEX = re.compile(r"^[A-HJ-NPR-Z0-9]{17}$")
+
+@app.route("/api/vin/validate", methods=["POST"])
+@jwt_required(optional=True)
+def validate_vin_endpoint():
+    """
+    Validácia VIN formátu a checksumu
+    ---
+    tags:
+      - VIN
+    security:
+      - bearerAuth: []
+    description: |
+      Overí:
+      - či VIN má správny formát
+      - či má správny checksum
+      - či sa vozidlo nachádza v databáze
+
+      Možné stavy:
+      - invalid_format
+      - invalid_checksum
+      - not_found
+      - valid
+
+      **Príklad requestu:**
+      ```json
+      {
+        "vin": "WF0XXXXX12345678"
+      }
+      ```
+    parameters:
+      - in: body
+        name: body
+        required: true
+        schema:
+          type: object
+          required:
+            - vin
+          properties:
+            vin:
+              type: string
+              example: "1HGCM82633A123456"
+    responses:
+      200:
+        description: Validácia vykonaná
+      400:
+        description: Chýbajúci VIN
+      500:
+        description: Server error
+    """
+    try:
+        payload = request.get_json()
+        vin = (payload.get("vin") or "").strip().upper()
+
+        if not vin:
+            return jsonify({"error": "Missing 'vin' parameter"}), 400
+
+        validation = validate_vin_value(vin)
+        if not validation["valid"]:
+            return jsonify({
+                "status": "invalid",
+                "vin": vin,
+                **validation
+            }), 200
+
+        vehicle = Vehicle.query.filter_by(vin=vin).first()
+        if not vehicle:
+            return jsonify({
+                "status": "not_found",
+                "vin": vin,
+                "valid": True,
+                "reason": "not_found",
+                "message": "Vozidlo nie je v našej databáze."
+            }), 200
+
+        return jsonify({
+            "status": "valid",
+            "vin": vin,
+            "valid": True,
+            "reason": None,
+            "message": "VIN is valid",
+            "vehicle_exists": True
+        }), 200
+
+    except Exception as e:
+        print("❌ VIN VALIDATION ERROR:", e)
+        return jsonify({"error": str(e)}), 500
+        
+def compute_vin_check_digit(vin: str) -> str | None:
+    vin = (vin or "").strip().upper()
+
+    if not VIN_ALLOWED_REGEX.match(vin):
+        return None
+
+    total = 0
+    for i, ch in enumerate(vin):
+        value = VIN_TRANSLITERATION.get(ch)
+        if value is None:
+            return None
+        total += value * VIN_WEIGHTS[i]
+
+    remainder = total % 11
+    return "X" if remainder == 10 else str(remainder)
+
+
+def validate_vin_value(vin: str) -> dict:
+    vin = (vin or "").strip().upper()
+
+    if len(vin) != 17:
+        return {
+            "valid": False,
+            "reason": "invalid_format",
+            "message": "Takéto VIN nemôže existovať."
+        }
+
+    if not VIN_ALLOWED_REGEX.match(vin):
+        return {
+            "valid": False,
+            "reason": "invalid_format",
+            "message": "Takéto VIN nemôže existovať."
+        }
+
+    expected_check_digit = compute_vin_check_digit(vin)
+    if expected_check_digit is None:
+        return {
+            "valid": False,
+            "reason": "invalid_format",
+            "message": "Takéto VIN nemôže existovať."
+        }
+
+    actual_check_digit = vin[8]
+    if actual_check_digit != expected_check_digit:
+        return {
+            "valid": False,
+            "reason": "invalid_checksum",
+            "message": "Zlý VIN checksum.",
+            "expected_check_digit": expected_check_digit,
+            "actual_check_digit": actual_check_digit,
+        }
+
+    return {
+        "valid": True,
+        "reason": None,
+        "message": "VIN is valid",
+        "expected_check_digit": expected_check_digit,
+        "actual_check_digit": actual_check_digit,
+    }
 
 @app.route("/api/device/<int:device_id>/events", methods=["GET"])
 @jwt_required()
