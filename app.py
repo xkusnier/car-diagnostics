@@ -3158,7 +3158,26 @@ def receive_can_packet():
             vehicle = Vehicle.query.get(state.last_vin_id)
             if not vehicle:
                 return jsonify({"error": "Vehicle not found"}), 404
+                # špeciálny packet = ECU nevrátila žiadne DTC
+            if dtc_code in {"NO_DTCS", "NO_DTCS", "NO CODES", "NO_CODES"}:
+                DTCCodeActive.query.filter_by(vin_id=vehicle.id).delete()
+                db.session.commit()
         
+                socketio.emit("dtc_update", {
+                    "device_id": device_id,
+                    "dtc_code": None,
+                    "severity": None,
+                    "description": None,
+                    "timestamp": datetime.utcnow().isoformat(),
+                    "active_dtcs_cleared": True
+                })
+        
+                return jsonify({
+                    "status": "no_dtcs",
+                    "message": "No active DTCs reported",
+                    "vin": vehicle.vin
+                }), 200
+                
             meaning = DtcCodeMeaning.query.filter(
                 db.func.lower(DtcCodeMeaning.dtc_code) == dtc_code.lower()
             ).first()
