@@ -1137,6 +1137,10 @@ def dashboard_summary():
                 device_link = DeviceVehicle.query.filter_by(last_vin_id=vehicle.id).first()
                 linked_device = Device.query.get(device_link.device_id) if device_link else None
 
+                owner_links = UserVehicle.query.filter_by(vehicle_id=vehicle.id).all()
+                owner_user_ids = [link.user_id for link in owner_links]
+                primary_user_id = owner_user_ids[0] if owner_user_ids else None
+
                 vehicles_with_issues.append({
                     "vehicle_id": vehicle.id,
                     "vin": vehicle.vin,
@@ -1146,7 +1150,9 @@ def dashboard_summary():
                     "engine": vehicle.engine,
                     "dtc_count": dtc_count,
                     "device_id": linked_device.id if linked_device else None,
-                    "online": linked_device.status if linked_device else False
+                    "online": linked_device.status if linked_device else False,
+                    "user_id": primary_user_id,
+                    "owner_user_ids": owner_user_ids
                 })
 
         vehicles_with_issues.sort(key=lambda x: x["dtc_count"], reverse=True)
@@ -1836,16 +1842,17 @@ def delete_user_vehicle(vin):
         if not user:
             return jsonify({"error": "User not found"}), 404
 
-        # Nájsť vozidlo podľa VIN
         vehicle = Vehicle.query.filter_by(vin=vin.upper()).first()
         if not vehicle:
             return jsonify({"error": "Vehicle not found"}), 404
 
-        # Nájsť a vymazať záznam v user_vehicles
-        user_vehicle = UserVehicle.query.filter_by(
-            user_id=user_id,
-            vehicle_id=vehicle.id
-        ).first()
+        if user.role == "admin":
+            user_vehicle = UserVehicle.query.filter_by(vehicle_id=vehicle.id).first()
+        else:
+            user_vehicle = UserVehicle.query.filter_by(
+                user_id=user_id,
+                vehicle_id=vehicle.id
+            ).first()
 
         if not user_vehicle:
             return jsonify({"error": "Vehicle not associated with this user"}), 404
@@ -3458,6 +3465,7 @@ def get_device_live(device_id):
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
+
 @app.route("/api/vehicles/telemetry-comparison", methods=["GET"])
 @jwt_required()
 def vehicles_telemetry_comparison():
@@ -3471,6 +3479,7 @@ def vehicles_telemetry_comparison():
     description: |
         Vráti štatistické údaje (priemery) z historických telemetrických dát.
         Zobrazuje všetky vozidlá, ktoré boli kedy priradené k používateľovi.
+        Admin vidí všetky vozidlá.
     """
     try:
         user_id = int(get_jwt_identity())
@@ -3478,20 +3487,25 @@ def vehicles_telemetry_comparison():
         if not user:
             return jsonify({"error": "User not found"}), 404
 
-        # ✅ ZÍSKAŤ VŠETKY VOZIDLÁ POUŽÍVATEĽA Z user_vehicles
-        user_vehicles = UserVehicle.query.filter_by(user_id=user_id).all()
-        
         vehicles_data = []
         online_count = 0
 
-        for uv in user_vehicles:
-            vehicle = uv.vehicle
+        if user.role == "admin":
+            vehicles = Vehicle.query.all()
+        else:
+            user_vehicles = UserVehicle.query.filter_by(user_id=user_id).all()
+            vehicles = [uv.vehicle for uv in user_vehicles]
 
-            # Zisti či existuje nejaké zariadenie aktuálne priradené k tomuto vozidlu
+        for vehicle in vehicles:
+            owner_links = UserVehicle.query.filter_by(vehicle_id=vehicle.id).all()
+            owner_user_ids = [link.user_id for link in owner_links]
+            primary_user_id = owner_user_ids[0] if owner_user_ids else None
+
+            # aktuálne zariadenie priradené k vozidlu
             device_vehicle = DeviceVehicle.query.filter_by(last_vin_id=vehicle.id).first()
             device_status = False
             device_id = None
-            
+
             if device_vehicle:
                 device = Device.query.get(device_vehicle.device_id)
                 if device:
@@ -3500,27 +3514,31 @@ def vehicles_telemetry_comparison():
                     if device_status:
                         online_count += 1
 
-            # ✅ POČÍTANIE ŠTATISTÍK Z HISTORY TABUĽKY
+            # štatistiky z history tabuľky
             stats = db.session.query(
-                func.avg(VehicleTelemetryHistory.engine_rpm).label('avg_rpm'),
-                func.avg(VehicleTelemetryHistory.speed).label('avg_speed'),
-                func.avg(VehicleTelemetryHistory.consumption_l100km).label('avg_consumption'),
-                func.max(VehicleTelemetryHistory.engine_rpm).label('max_rpm'),
-                func.min(VehicleTelemetryHistory.engine_rpm).label('min_rpm'),
-                func.count(VehicleTelemetryHistory.id).label('samples')
-            ).filter(VehicleTelemetryHistory.vehicle_id == vehicle.id).first()
+                func.avg(VehicleTelemetryHistory.engine_rpm).label("avg_rpm"),
+                func.avg(VehicleTelemetryHistory.speed).label("avg_speed"),
+                func.avg(VehicleTelemetryHistory.consumption_l100km).label("avg_consumption"),
+                func.max(VehicleTelemetryHistory.engine_rpm).label("max_rpm"),
+                func.min(VehicleTelemetryHistory.engine_rpm).label("min_rpm"),
+                func.count(VehicleTelemetryHistory.id).label("samples")
+            ).filter(
+                VehicleTelemetryHistory.vehicle_id == vehicle.id
+            ).first()
 
-            # Získať posledný odometer z LIVE tabuľky (aktuálny stav)
+            # live odometer
             live = VehicleTelemetryLive.query.filter_by(vehicle_id=vehicle.id).first()
 
             vehicles_data.append({
-                "device_id": device_id,  # Môže byť None
+                "device_id": device_id,
                 "vin": vehicle.vin,
                 "brand": vehicle.brand,
                 "model": vehicle.model,
                 "year": vehicle.year,
                 "engine": vehicle.engine,
-                "online": device_status,  # True ak je nejaké zariadenie online s týmto VIN
+                "online": device_status,
+                "user_id": primary_user_id,
+                "owner_user_ids": owner_user_ids,
                 "statistics": {
                     "avg_rpm": round(stats.avg_rpm) if stats and stats.avg_rpm else None,
                     "avg_speed": round(stats.avg_speed) if stats and stats.avg_speed else None,
@@ -3532,7 +3550,6 @@ def vehicles_telemetry_comparison():
                 }
             })
 
-        # Celkové štatistiky
         total_stats = {
             "total_vehicles": len(vehicles_data),
             "online_vehicles": online_count,
@@ -3548,6 +3565,7 @@ def vehicles_telemetry_comparison():
     except Exception as e:
         print("❌ VEHICLES TELEMETRY COMPARISON ERROR:", e)
         return jsonify({"error": str(e)}), 500
+
 # SHOW ALL
 # =========================
 @app.route("/api/all", methods=["GET"])
