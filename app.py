@@ -1345,7 +1345,7 @@ def _save_telemetry_to_db(device_id: int, t: dict) -> None:
                     active_trip.start_odometer = current_odometer
                 active_trip.end_odometer = current_odometer
                 if active_trip.start_odometer and active_trip.end_odometer:
-                    active_trip.distance_km = (active_trip.end_odometer - active_trip.start_odometer) / 1000.0
+                    active_trip.distance_km = (active_trip.end_odometer - active_trip.start_odometer)
             
             # Rýchlosť
             current_speed = t.get("speed")
