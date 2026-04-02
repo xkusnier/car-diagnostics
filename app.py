@@ -439,7 +439,6 @@ def serialize_driving_event(event: DrivingEvent) -> dict:
         },
         "created_at": _iso(event.created_at),
     }
-}
 
 @app.route("/api/driving-event", methods=["POST"])
 def receive_driving_event():
