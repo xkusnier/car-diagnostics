@@ -391,7 +391,8 @@ class DrivingEvent(db.Model):
     event_timestamp = db.Column(db.DateTime, nullable=False, index=True)
     speed_kmh = db.Column(db.Float, nullable=True)
     g_force = db.Column(db.Float, nullable=True)
-
+    latitude = db.Column(db.Float, nullable=True)
+    longitude = db.Column(db.Float, nullable=True)
     accel_x = db.Column(db.Float, nullable=True)
     accel_y = db.Column(db.Float, nullable=True)
     accel_z = db.Column(db.Float, nullable=True)
@@ -404,8 +405,7 @@ class DrivingEvent(db.Model):
 
     device = db.relationship("Device", backref=db.backref("driving_events", lazy="dynamic"))
     vehicle = db.relationship("Vehicle", backref=db.backref("driving_events", lazy="dynamic"))
-    latitude = db.Column(db.Float, nullable=True)
-    longitude = db.Column(db.Float, nullable=True)
+
 
 ALLOWED_DRIVING_EVENT_TYPES = {
     "HARD_BRAKE",
