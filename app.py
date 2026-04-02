@@ -337,8 +337,6 @@ class VehicleTelemetryLive(db.Model):
     maf = db.Column(db.Float, nullable=True)
     fuel_type = db.Column(db.String(20), nullable=True)
     speed = db.Column(db.Integer, nullable=True)
-    latitude = db.Column(db.Float, nullable=True)
-    longitude = db.Column(db.Float, nullable=True)
     created_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
     
 
@@ -365,8 +363,21 @@ class VehicleTelemetryHistory(db.Model):
     maf = db.Column(db.Float, nullable=True)
     fuel_type = db.Column(db.String(20), nullable=True)
     speed = db.Column(db.Integer, nullable=True)
-    latitude = db.Column(db.Float, nullable=True)
-    longitude = db.Column(db.Float, nullable=True)
+    created_at = db.Column(db.DateTime, default=datetime.utcnow, index=True)
+
+class VehicleLocationHistory(db.Model):
+    __tablename__ = "vehicle_location_history"
+
+    id = db.Column(db.Integer, primary_key=True)
+    vehicle_id = db.Column(db.Integer, db.ForeignKey("vehicles.id"), nullable=False, index=True)
+    vehicle = db.relationship("Vehicle", backref=db.backref("location_history", lazy="dynamic"))
+
+    trip_id = db.Column(db.Integer, db.ForeignKey("trips.id"), nullable=True, index=True)
+    trip = db.relationship("Trip", backref=db.backref("location_points", lazy="dynamic"))
+
+    latitude = db.Column(db.Float, nullable=False)
+    longitude = db.Column(db.Float, nullable=False)
+
     created_at = db.Column(db.DateTime, default=datetime.utcnow, index=True)
 class DrivingEvent(db.Model):
     __tablename__ = "driving_events"
@@ -1474,9 +1485,7 @@ def _save_telemetry_to_db(device_id: int, t: dict) -> None:
         db.session.rollback()
         print(f"❌ Error saving telemetry: {e}")
 
-
 def _save_location_to_db(device_id: int, latitude: float, longitude: float, timestamp: datetime | None = None) -> int | None:
-    """Uloží GPS polohu do LIVE + HISTORY pre aktuálne priradené vozidlo."""
     try:
         device_vehicle = DeviceVehicle.query.filter_by(device_id=device_id).first()
         if not device_vehicle or not device_vehicle.last_vin_id:
@@ -1491,28 +1500,14 @@ def _save_location_to_db(device_id: int, latitude: float, longitude: float, time
             is_completed=False
         ).first()
 
-        history_row = VehicleTelemetryHistory(
+        location_row = VehicleLocationHistory(
             vehicle_id=vehicle_id,
             trip_id=active_trip.id if active_trip else None,
             latitude=latitude,
             longitude=longitude,
             created_at=current_time
         )
-        db.session.add(history_row)
-
-        live_row = VehicleTelemetryLive.query.filter_by(vehicle_id=vehicle_id).first()
-        if live_row:
-            live_row.latitude = latitude
-            live_row.longitude = longitude
-            live_row.created_at = current_time
-        else:
-            live_row = VehicleTelemetryLive(
-                vehicle_id=vehicle_id,
-                latitude=latitude,
-                longitude=longitude,
-                created_at=current_time
-            )
-            db.session.add(live_row)
+        db.session.add(location_row)
 
         db.session.commit()
         print(f"✅ Location saved for vehicle_id: {vehicle_id}")
@@ -3443,7 +3438,7 @@ def _get_vehicle_id_from_device(device_id: int) -> int | None:
         return device_vehicle.last_vin_id
     return None
 
-def _get_latest_telemetry(device_id: int) -> VehicleTelemetryLive | None:
+def _get_latest_telemetry(device_id: int) -> VehicleTelemetryLive | None:  # 🔥 Zmena návratového typu
     """Získa najnovšiu live telemetriu pre zariadenie (cez vehicle_id)."""
     vehicle_id = _get_vehicle_id_from_device(device_id)
     if not vehicle_id:
@@ -3590,6 +3585,49 @@ def get_device_speed(device_id):
     }), 200
 
 
+@app.route("/api/device/<int:device_id>/location", methods=["GET"])
+@jwt_required()
+def get_device_location(device_id):
+    try:
+        user_id = int(get_jwt_identity())
+        user = User.query.get(user_id)
+
+        if not user:
+            return jsonify({"error": "User not found"}), 404
+
+        if user.role != "admin":
+            device = Device.query.filter_by(id=device_id, user_id=user_id).first()
+            if not device:
+                return jsonify({"error": "Device not found or not owned by user"}), 404
+
+        vehicle_id = _get_vehicle_id_from_device(device_id)
+        if not vehicle_id:
+            return jsonify({"error": "No VIN associated"}), 404
+
+        latest_location = (
+            VehicleLocationHistory.query
+            .filter_by(vehicle_id=vehicle_id)
+            .order_by(VehicleLocationHistory.created_at.desc())
+            .first()
+        )
+        if not latest_location:
+            return jsonify({"error": "No location data"}), 404
+
+        return jsonify({
+            "status": "success",
+            "device_id": device_id,
+            "vehicle_id": vehicle_id,
+            "location": {
+                "latitude": latest_location.latitude,
+                "longitude": latest_location.longitude
+            },
+            "timestamp": _iso(latest_location.created_at)
+        }), 200
+
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
 # Nový endpoint pre live data
 @app.route("/api/device/<int:device_id>/live", methods=["GET"])
 @jwt_required()
@@ -3636,51 +3674,9 @@ def get_device_live(device_id):
                 "type": live.fuel_type
             },
             "speed": live.speed,
-            "location": {
-                "latitude": live.latitude,
-                "longitude": live.longitude
-            },
             "timestamp": _iso(live.created_at)
         }), 200
         
-    except Exception as e:
-        return jsonify({"error": str(e)}), 500
-
-
-@app.route("/api/device/<int:device_id>/location", methods=["GET"])
-@jwt_required()
-def get_device_location(device_id):
-    try:
-        user_id = int(get_jwt_identity())
-        user = User.query.get(user_id)
-
-        if not user:
-            return jsonify({"error": "User not found"}), 404
-
-        if user.role != "admin":
-            device = Device.query.filter_by(id=device_id, user_id=user_id).first()
-            if not device:
-                return jsonify({"error": "Device not found or not owned by user"}), 404
-
-        vehicle_id = _get_vehicle_id_from_device(device_id)
-        if not vehicle_id:
-            return jsonify({"error": "No VIN associated"}), 404
-
-        live = VehicleTelemetryLive.query.filter_by(vehicle_id=vehicle_id).first()
-        if not live or live.latitude is None or live.longitude is None:
-            return jsonify({"error": "No location data"}), 404
-
-        return jsonify({
-            "status": "success",
-            "device_id": device_id,
-            "vehicle_id": vehicle_id,
-            "location": {
-                "latitude": live.latitude,
-                "longitude": live.longitude
-            },
-            "timestamp": _iso(live.created_at)
-        }), 200
-
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
