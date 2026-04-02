@@ -404,7 +404,8 @@ class DrivingEvent(db.Model):
 
     device = db.relationship("Device", backref=db.backref("driving_events", lazy="dynamic"))
     vehicle = db.relationship("Vehicle", backref=db.backref("driving_events", lazy="dynamic"))
-
+    latitude = db.Column(db.Float, nullable=True)
+    longitude = db.Column(db.Float, nullable=True)
 
 ALLOWED_DRIVING_EVENT_TYPES = {
     "HARD_BRAKE",
@@ -424,6 +425,8 @@ def serialize_driving_event(event: DrivingEvent) -> dict:
         "event_timestamp": _iso(event.event_timestamp),
         "speed_kmh": event.speed_kmh,
         "g_force": event.g_force,
+        "latitude": event.latitude,
+        "longitude": event.longitude,
         "accel": {
             "x": event.accel_x,
             "y": event.accel_y,
@@ -436,7 +439,7 @@ def serialize_driving_event(event: DrivingEvent) -> dict:
         },
         "created_at": _iso(event.created_at),
     }
-
+}
 
 @app.route("/api/driving-event", methods=["POST"])
 def receive_driving_event():
@@ -463,6 +466,8 @@ def receive_driving_event():
         "timestamp": 1710500000.123,
         "g_force": 0.72,
         "speed_kmh": 85,
+        "latitude": 48.1486,
+        "longitude": 17.1077,
         "accel": {
           "x": -7.06,
           "y": 0.12,
@@ -504,6 +509,12 @@ def receive_driving_event():
             speed_kmh:
               type: number
               example: 85
+            latitude:
+              type: number
+              example: 48.1486
+            longitude:
+              type: number
+              example: 17.1077
             accel:
               type: object
               properties:
@@ -547,6 +558,8 @@ def receive_driving_event():
         timestamp_raw = payload.get("timestamp")
         g_force = payload.get("g_force")
         speed_kmh = payload.get("speed_kmh")
+        latitude_raw = payload.get("latitude")
+        longitude_raw = payload.get("longitude")
 
         accel = payload.get("accel") or {}
         gyro = payload.get("gyro") or {}
@@ -598,6 +611,22 @@ def receive_driving_event():
         except (TypeError, ValueError):
             return jsonify({"error": "speed_kmh must be a number"}), 400
 
+        try:
+            latitude_val = float(latitude_raw) if latitude_raw is not None else None
+        except (TypeError, ValueError):
+            return jsonify({"error": "latitude must be a number"}), 400
+
+        try:
+            longitude_val = float(longitude_raw) if longitude_raw is not None else None
+        except (TypeError, ValueError):
+            return jsonify({"error": "longitude must be a number"}), 400
+
+        if latitude_val is not None and (latitude_val < -90 or latitude_val > 90):
+            return jsonify({"error": "latitude must be between -90 and 90"}), 400
+
+        if longitude_val is not None and (longitude_val < -180 or longitude_val > 180):
+            return jsonify({"error": "longitude must be between -180 and 180"}), 400
+
         def _to_float(v):
             if v is None:
                 return None
@@ -610,6 +639,8 @@ def receive_driving_event():
             event_timestamp=event_timestamp,
             speed_kmh=speed_kmh_val,
             g_force=g_force_val,
+            latitude=latitude_val,
+            longitude=longitude_val,
             accel_x=_to_float(accel.get("x")),
             accel_y=_to_float(accel.get("y")),
             accel_z=_to_float(accel.get("z")),
@@ -635,7 +666,6 @@ def receive_driving_event():
         db.session.rollback()
         print("❌ DRIVING EVENT ERROR:", e)
         return jsonify({"error": str(e)}), 500
-
 VIN_TRANSLITERATION = {
     "A": 1, "B": 2, "C": 3, "D": 4, "E": 5, "F": 6, "G": 7, "H": 8,
     "J": 1, "K": 2, "L": 3, "M": 4, "N": 5, "P": 7, "R": 9,
