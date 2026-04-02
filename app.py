@@ -337,6 +337,8 @@ class VehicleTelemetryLive(db.Model):
     maf = db.Column(db.Float, nullable=True)
     fuel_type = db.Column(db.String(20), nullable=True)
     speed = db.Column(db.Integer, nullable=True)
+    latitude = db.Column(db.Float, nullable=True)
+    longitude = db.Column(db.Float, nullable=True)
     created_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
     
 
@@ -363,6 +365,8 @@ class VehicleTelemetryHistory(db.Model):
     maf = db.Column(db.Float, nullable=True)
     fuel_type = db.Column(db.String(20), nullable=True)
     speed = db.Column(db.Integer, nullable=True)
+    latitude = db.Column(db.Float, nullable=True)
+    longitude = db.Column(db.Float, nullable=True)
     created_at = db.Column(db.DateTime, default=datetime.utcnow, index=True)
 class DrivingEvent(db.Model):
     __tablename__ = "driving_events"
@@ -1468,7 +1472,57 @@ def _save_telemetry_to_db(device_id: int, t: dict) -> None:
         
     except Exception as e:
         db.session.rollback()
-        print(f"❌ Error saving telemetry: {e}")# ✅ NEW: SOCKET.IO EVENTS
+        print(f"❌ Error saving telemetry: {e}")
+
+
+def _save_location_to_db(device_id: int, latitude: float, longitude: float, timestamp: datetime | None = None) -> int | None:
+    """Uloží GPS polohu do LIVE + HISTORY pre aktuálne priradené vozidlo."""
+    try:
+        device_vehicle = DeviceVehicle.query.filter_by(device_id=device_id).first()
+        if not device_vehicle or not device_vehicle.last_vin_id:
+            print(f"❌ No vehicle associated with device {device_id}")
+            return None
+
+        vehicle_id = device_vehicle.last_vin_id
+        current_time = timestamp or datetime.utcnow()
+
+        active_trip = Trip.query.filter_by(
+            vehicle_id=vehicle_id,
+            is_completed=False
+        ).first()
+
+        history_row = VehicleTelemetryHistory(
+            vehicle_id=vehicle_id,
+            trip_id=active_trip.id if active_trip else None,
+            latitude=latitude,
+            longitude=longitude,
+            created_at=current_time
+        )
+        db.session.add(history_row)
+
+        live_row = VehicleTelemetryLive.query.filter_by(vehicle_id=vehicle_id).first()
+        if live_row:
+            live_row.latitude = latitude
+            live_row.longitude = longitude
+            live_row.created_at = current_time
+        else:
+            live_row = VehicleTelemetryLive(
+                vehicle_id=vehicle_id,
+                latitude=latitude,
+                longitude=longitude,
+                created_at=current_time
+            )
+            db.session.add(live_row)
+
+        db.session.commit()
+        print(f"✅ Location saved for vehicle_id: {vehicle_id}")
+        return vehicle_id
+
+    except Exception as e:
+        db.session.rollback()
+        print(f"❌ Error saving location: {e}")
+        return None
+# ✅ NEW: SOCKET.IO EVENTS
 # =========================
 @socketio.on("connect")
 def ws_connect():
@@ -3215,6 +3269,134 @@ def receive_can_packet():
         db.session.rollback()
         return jsonify({"error": str(e)}), 500
 
+@app.route("/api/location", methods=["POST"])
+def receive_location():
+    """
+    Príjem GPS polohy z RPi
+    ---
+    tags:
+      - Device Communication
+    description: |
+      Samostatný endpoint pre príjem GPS polohy z RPi.
+
+      **Príklad requestu:**
+      ```json
+      {
+        "device_id": 12345,
+        "latitude": 48.1486,
+        "longitude": 17.1077
+      }
+      ```
+    parameters:
+      - in: body
+        name: body
+        required: true
+        schema:
+          type: object
+          required:
+            - device_id
+            - latitude
+            - longitude
+          properties:
+            device_id:
+              type: integer
+              example: 12345
+            latitude:
+              type: number
+              example: 48.1486
+            longitude:
+              type: number
+              example: 17.1077
+            timestamp:
+              type: number
+              example: 1710500000.123
+    responses:
+      201:
+        description: Poloha uložená
+      400:
+        description: Chybné dáta
+      404:
+        description: Device neexistuje
+      500:
+        description: Server error
+    """
+    try:
+        payload = request.get_json()
+
+        device_id_raw = payload.get("device_id")
+        latitude_raw = payload.get("latitude")
+        longitude_raw = payload.get("longitude")
+        timestamp_raw = payload.get("timestamp")
+
+        try:
+            device_id = int(device_id_raw)
+        except (TypeError, ValueError):
+            return jsonify({"error": "device_id must be an integer"}), 400
+
+        try:
+            latitude = float(latitude_raw)
+            longitude = float(longitude_raw)
+        except (TypeError, ValueError):
+            return jsonify({"error": "latitude and longitude must be numbers"}), 400
+
+        if latitude < -90 or latitude > 90:
+            return jsonify({"error": "latitude must be between -90 and 90"}), 400
+
+        if longitude < -180 or longitude > 180:
+            return jsonify({"error": "longitude must be between -180 and 180"}), 400
+
+        device = Device.query.get(device_id)
+        if not device:
+            return jsonify({"error": f"Device {device_id} not found"}), 404
+
+        if timestamp_raw is None:
+            location_timestamp = datetime.utcnow()
+        else:
+            try:
+                location_timestamp = datetime.utcfromtimestamp(float(timestamp_raw))
+            except (TypeError, ValueError):
+                return jsonify({"error": "timestamp must be unix timestamp in seconds"}), 400
+
+        vehicle_id = _save_location_to_db(
+            device_id=device_id,
+            latitude=latitude,
+            longitude=longitude,
+            timestamp=location_timestamp
+        )
+
+        if not vehicle_id:
+            return jsonify({
+                "error": "No VIN associated with this device",
+                "message": "Please send VIN first"
+            }), 400
+
+        device.status = True
+        db.session.commit()
+
+        ws_payload = {
+            "device_id": device_id,
+            "vehicle_id": vehicle_id,
+            "latitude": latitude,
+            "longitude": longitude,
+            "timestamp": _iso(location_timestamp)
+        }
+
+        socketio.emit("location_update", ws_payload, room=f"device:{device_id}")
+
+        return jsonify({
+            "status": "location stored",
+            "device_id": device_id,
+            "vehicle_id": vehicle_id,
+            "latitude": latitude,
+            "longitude": longitude,
+            "timestamp": _iso(location_timestamp)
+        }), 201
+
+    except Exception as e:
+        db.session.rollback()
+        print("❌ LOCATION ERROR:", e)
+        return jsonify({"error": str(e)}), 500
+
 # =========================
 # DTC HISTORY (simple)
 # =========================
@@ -3261,18 +3443,13 @@ def _get_vehicle_id_from_device(device_id: int) -> int | None:
         return device_vehicle.last_vin_id
     return None
 
-def _get_latest_telemetry(device_id: int) -> VehicleTelemetry | None:  # 🔥 Zmena návratového typu
-    """Získa najnovšiu telemetriu pre zariadenie (cez vehicle_id)"""
+def _get_latest_telemetry(device_id: int) -> VehicleTelemetryLive | None:
+    """Získa najnovšiu live telemetriu pre zariadenie (cez vehicle_id)."""
     vehicle_id = _get_vehicle_id_from_device(device_id)
     if not vehicle_id:
         return None
-    
-    return (
-        VehicleTelemetry.query  # 🔥 Použi nový model
-        .filter_by(vehicle_id=vehicle_id)
-        .order_by(VehicleTelemetry.created_at.desc())
-        .first()
-    )
+
+    return VehicleTelemetryLive.query.filter_by(vehicle_id=vehicle_id).first()
 
 @app.route("/api/device/<int:device_id>/odometer", methods=["GET"])
 @jwt_required()
@@ -3459,9 +3636,51 @@ def get_device_live(device_id):
                 "type": live.fuel_type
             },
             "speed": live.speed,
+            "location": {
+                "latitude": live.latitude,
+                "longitude": live.longitude
+            },
             "timestamp": _iso(live.created_at)
         }), 200
         
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route("/api/device/<int:device_id>/location", methods=["GET"])
+@jwt_required()
+def get_device_location(device_id):
+    try:
+        user_id = int(get_jwt_identity())
+        user = User.query.get(user_id)
+
+        if not user:
+            return jsonify({"error": "User not found"}), 404
+
+        if user.role != "admin":
+            device = Device.query.filter_by(id=device_id, user_id=user_id).first()
+            if not device:
+                return jsonify({"error": "Device not found or not owned by user"}), 404
+
+        vehicle_id = _get_vehicle_id_from_device(device_id)
+        if not vehicle_id:
+            return jsonify({"error": "No VIN associated"}), 404
+
+        live = VehicleTelemetryLive.query.filter_by(vehicle_id=vehicle_id).first()
+        if not live or live.latitude is None or live.longitude is None:
+            return jsonify({"error": "No location data"}), 404
+
+        return jsonify({
+            "status": "success",
+            "device_id": device_id,
+            "vehicle_id": vehicle_id,
+            "location": {
+                "latitude": live.latitude,
+                "longitude": live.longitude
+            },
+            "timestamp": _iso(live.created_at)
+        }), 200
+
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
