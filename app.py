@@ -1273,28 +1273,43 @@ def get_vehicle_trips(vin):
                 ).scalar()
                 trip.avg_consumption_l100km = consumptions
             
-            trips_data.append({
-                "id": trip.id,
-                "start_time": _iso(trip.start_time),
-                "end_time": _iso(trip.end_time),
-                "duration_seconds": trip.duration_seconds,
-                "samples_count": trip.samples_count,
-                "distance_km": round(trip.distance_km, 1) if trip.distance_km else None,
-                "avg_speed": round(trip.avg_speed, 1) if trip.avg_speed else None,
-                "max_speed": trip.max_speed,
-                "avg_rpm": round(trip.avg_rpm) if trip.avg_rpm else None,
-                "max_rpm": trip.max_rpm,
-                "min_rpm": trip.min_rpm,
-                "avg_consumption_l100km": round(trip.avg_consumption_l100km, 1) if trip.avg_consumption_l100km else None,
-                "total_fuel_used_l": round(trip.total_fuel_used_l, 2) if trip.total_fuel_used_l else None,
-                "avg_coolant_temp": round(trip.avg_coolant_temp) if trip.avg_coolant_temp else None,
-                "max_coolant_temp": trip.max_coolant_temp,
-                "avg_oil_temp": round(trip.avg_oil_temp) if trip.avg_oil_temp else None,
-                "max_oil_temp": trip.max_oil_temp,
-                "engine_starts": trip.engine_starts,
-                "start_odometer": trip.start_odometer,
-                "end_odometer": trip.end_odometer
-            })
+                location_points = (
+                    VehicleLocationHistory.query
+                    .filter_by(trip_id=trip.id)
+                    .order_by(VehicleLocationHistory.created_at.asc())
+                    .all()
+                )
+                
+                trips_data.append({
+                    "id": trip.id,
+                    "start_time": _iso(trip.start_time),
+                    "end_time": _iso(trip.end_time),
+                    "duration_seconds": trip.duration_seconds,
+                    "samples_count": trip.samples_count,
+                    "distance_km": round(trip.distance_km, 1) if trip.distance_km else None,
+                    "avg_speed": round(trip.avg_speed, 1) if trip.avg_speed else None,
+                    "max_speed": trip.max_speed,
+                    "avg_rpm": round(trip.avg_rpm) if trip.avg_rpm else None,
+                    "max_rpm": trip.max_rpm,
+                    "min_rpm": trip.min_rpm,
+                    "avg_consumption_l100km": round(trip.avg_consumption_l100km, 1) if trip.avg_consumption_l100km else None,
+                    "total_fuel_used_l": round(trip.total_fuel_used_l, 2) if trip.total_fuel_used_l else None,
+                    "avg_coolant_temp": round(trip.avg_coolant_temp) if trip.avg_coolant_temp else None,
+                    "max_coolant_temp": trip.max_coolant_temp,
+                    "avg_oil_temp": round(trip.avg_oil_temp) if trip.avg_oil_temp else None,
+                    "max_oil_temp": trip.max_oil_temp,
+                    "engine_starts": trip.engine_starts,
+                    "start_odometer": trip.start_odometer,
+                    "end_odometer": trip.end_odometer,
+                    "location_points": [
+                        {
+                            "latitude": p.latitude,
+                            "longitude": p.longitude,
+                            "timestamp": _iso(p.created_at)
+                        }
+                        for p in location_points
+                    ]
+                })
 
         return jsonify({
             "status": "success",
