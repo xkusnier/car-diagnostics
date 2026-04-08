@@ -325,6 +325,7 @@ class VehicleTelemetryLive(db.Model):
     vehicle = db.relationship("Vehicle", backref=db.backref("live_telemetry", uselist=False))
     
     odometer = db.Column(db.Integer, nullable=True)
+    odometer_source = db.Column(db.String(20), nullable=False, default="rpi")
     battery_voltage = db.Column(db.Float, nullable=True)
     battery_health = db.Column(db.String(30), nullable=True)
     engine_running = db.Column(db.Boolean, nullable=True)
@@ -351,6 +352,7 @@ class VehicleTelemetryHistory(db.Model):
     trip = db.relationship("Trip", backref=db.backref("telemetry_samples", lazy="dynamic"))
     
     odometer = db.Column(db.Integer, nullable=True)
+    odometer_source = db.Column(db.String(20), nullable=False, default="rpi")
     battery_voltage = db.Column(db.Float, nullable=True)
     battery_health = db.Column(db.String(30), nullable=True)
     engine_running = db.Column(db.Boolean, nullable=True)
@@ -1370,36 +1372,49 @@ def _save_telemetry_to_db(device_id: int, t: dict) -> None:
             return
 
         vehicle_id = device_vehicle.last_vin_id
-        
+
         battery = t.get("battery") or {}
         engine = t.get("engine") or {}
         fuel = t.get("fuel") or {}
-        
+
+        live_row = VehicleTelemetryLive.query.filter_by(vehicle_id=vehicle_id).first()
+        if not live_row:
+            live_row = VehicleTelemetryLive(
+                vehicle_id=vehicle_id,
+                odometer=t.get("odometer"),
+                odometer_source="rpi"
+            )
+            db.session.add(live_row)
+            db.session.flush()
+
+        odometer_source = (live_row.odometer_source or "rpi").lower()
+
         # Detekcia jazdy podľa stavu motora
         engine_running = engine.get("running")
-        
+
         # Získať aktuálnu aktívnu jazdu pre toto vozidlo
         active_trip = Trip.query.filter_by(
-            vehicle_id=vehicle_id, 
+            vehicle_id=vehicle_id,
             is_completed=False
         ).first()
-        
+
         current_time = datetime.utcnow()
-        
+
         # Ak motor práve naštartoval (predchádzajúci stav nebol running, teraz je running)
         if engine_running and not active_trip:
-            # Vytvor novú jazdu
+            start_odometer = live_row.odometer if odometer_source == "manual" else t.get("odometer")
+
             active_trip = Trip(
                 vehicle_id=vehicle_id,
                 start_time=current_time,
-                start_odometer=t.get("odometer"),
+                start_odometer=start_odometer,
                 engine_starts=1,
                 is_completed=False
             )
             db.session.add(active_trip)
             db.session.flush()  # Získa ID bez commitu
             print(f"✅ New trip started for vehicle {vehicle_id} at {current_time}")
-        
+
         # trip_id pre history záznam
         trip_id = active_trip.id if active_trip else None
 
@@ -1424,29 +1439,29 @@ def _save_telemetry_to_db(device_id: int, t: dict) -> None:
             trip_id=trip_id  # Priradíme trip_id
         )
         db.session.add(history_row)
-        
+
         # Aktualizuj štatistiky aktívnej jazdy
         if active_trip:
             # Základné počítadlá
             active_trip.samples_count += 1
             active_trip.end_time = current_time
-            
-            # Odometer a vzdialenosť
-            current_odometer = t.get("odometer")
-            if current_odometer:
-                if active_trip.start_odometer is None:
-                    active_trip.start_odometer = current_odometer
-                active_trip.end_odometer = current_odometer
-                if active_trip.start_odometer and active_trip.end_odometer:
-                    active_trip.distance_km = (active_trip.end_odometer - active_trip.start_odometer)
-            
+
+            # Odometer a vzdialenosť len pre RPI vozidlá
+            if odometer_source == "rpi":
+                current_odometer = t.get("odometer")
+                if current_odometer is not None:
+                    if active_trip.start_odometer is None:
+                        active_trip.start_odometer = current_odometer
+                    active_trip.end_odometer = current_odometer
+                    if active_trip.start_odometer is not None and active_trip.end_odometer is not None:
+                        active_trip.distance_km = (active_trip.end_odometer - active_trip.start_odometer)
+
             # Rýchlosť
             current_speed = t.get("speed")
             if current_speed is not None:
                 if active_trip.max_speed is None or current_speed > active_trip.max_speed:
                     active_trip.max_speed = current_speed
-                # Pre priemer budeme počítať až na konci
-            
+
             # Otáčky
             current_rpm = engine.get("rpm")
             if current_rpm:
@@ -1454,111 +1469,93 @@ def _save_telemetry_to_db(device_id: int, t: dict) -> None:
                     active_trip.max_rpm = current_rpm
                 if active_trip.min_rpm is None or current_rpm < active_trip.min_rpm:
                     active_trip.min_rpm = current_rpm
-            
+
             # Teploty
             current_coolant = engine.get("coolant_temp")
             if current_coolant:
                 if active_trip.max_coolant_temp is None or current_coolant > active_trip.max_coolant_temp:
                     active_trip.max_coolant_temp = current_coolant
-            
+
             current_oil = engine.get("oil_temp")
             if current_oil:
                 if active_trip.max_oil_temp is None or current_oil > active_trip.max_oil_temp:
                     active_trip.max_oil_temp = current_oil
-            
-            # Spotreba (ak máme consumption_l100km, môžeme počítať)
-            current_consumption = fuel.get("consumption_l100km")
-            if current_consumption:
-                # Pre priemer budeme počítať až na konci
-                pass
+
             # Trvanie
             if active_trip.start_time:
                 delta = current_time - active_trip.start_time
                 active_trip.duration_seconds = int(delta.total_seconds())
-        
+
         # Ak motor práve zastavil (bežal a teraz nebeží)
         if not engine_running and active_trip:
             # Vypočítaj priemery pred ukončením
-            # Získaj všetky záznamy z tejto jazdy
             trip_samples = VehicleTelemetryHistory.query.filter_by(trip_id=active_trip.id).all()
-            
+
             if trip_samples:
                 # Priemerná rýchlosť (len keď speed > 0)
                 speeds = [s.speed for s in trip_samples if s.speed and s.speed > 0]
                 if speeds:
                     active_trip.avg_speed = sum(speeds) / len(speeds)
-                
+
                 # Priemerné otáčky
                 rpms = [s.engine_rpm for s in trip_samples if s.engine_rpm]
                 if rpms:
                     active_trip.avg_rpm = sum(rpms) / len(rpms)
-                
+
                 # Priemerná spotreba
                 consumptions = [s.consumption_l100km for s in trip_samples if s.consumption_l100km]
                 if consumptions:
                     active_trip.avg_consumption_l100km = sum(consumptions) / len(consumptions)
-                
+
                 # Priemerné teploty
                 coolants = [s.coolant_temp for s in trip_samples if s.coolant_temp]
                 if coolants:
                     active_trip.avg_coolant_temp = sum(coolants) / len(coolants)
-                
+
                 oils = [s.oil_temp for s in trip_samples if s.oil_temp]
                 if oils:
                     active_trip.avg_oil_temp = sum(oils) / len(oils)
-                
-                # Celková spotreba v litroch (približne)
-                # consumption_l100km je spotreba na 100km, prepočet na litre podľa vzdialenosti
-                if active_trip.distance_km and active_trip.avg_consumption_l100km:
-                    active_trip.total_fuel_used_l = (active_trip.distance_km / 100) * active_trip.avg_consumption_l100km
-            
+
+            if odometer_source == "manual":
+                if active_trip.avg_speed is not None and active_trip.duration_seconds is not None:
+                    estimated_distance = active_trip.avg_speed * (active_trip.duration_seconds / 3600.0)
+                    active_trip.distance_km = estimated_distance
+
+                    start_odometer = active_trip.start_odometer if active_trip.start_odometer is not None else live_row.odometer
+                    start_odometer = start_odometer or 0
+                    active_trip.start_odometer = int(round(start_odometer))
+                    active_trip.end_odometer = int(round(start_odometer + estimated_distance))
+                    live_row.odometer = active_trip.end_odometer
+
+            # Celková spotreba v litroch (približne)
+            if active_trip.distance_km and active_trip.avg_consumption_l100km:
+                active_trip.total_fuel_used_l = (active_trip.distance_km / 100) * active_trip.avg_consumption_l100km
+
             # Ukonči jazdu
             active_trip.is_completed = True
             print(f"✅ Trip completed for vehicle {vehicle_id}, duration: {active_trip.duration_seconds}s")
 
         # 2️⃣ ULOŽ DO LIVE (posledný packet) - UPDATE alebo INSERT
-        live_row = VehicleTelemetryLive.query.filter_by(vehicle_id=vehicle_id).first()
-        if live_row:
-            # Update existujúceho
+        if odometer_source == "rpi":
             live_row.odometer = t.get("odometer")
-            live_row.battery_voltage = battery.get("battery_voltage")
-            live_row.battery_health = battery.get("health")
-            live_row.engine_running = engine_running
-            live_row.engine_rpm = engine.get("rpm")
-            live_row.engine_load = engine.get("load")
-            live_row.coolant_temp = engine.get("coolant_temp")
-            live_row.oil_temp = engine.get("oil_temp")
-            live_row.intake_air_temp = engine.get("intake_air_temp")
-            live_row.consumption_lh = fuel.get("consumption_lh")
-            live_row.consumption_l100km = fuel.get("consumption_l100km")
-            live_row.maf = fuel.get("maf")
-            live_row.fuel_type = fuel.get("type")
-            live_row.speed = t.get("speed")
-            live_row.created_at = current_time
-        else:
-            # Nový záznam
-            live_row = VehicleTelemetryLive(
-                vehicle_id=vehicle_id,
-                odometer=t.get("odometer"),
-                battery_voltage=battery.get("battery_voltage"),
-                battery_health=battery.get("health"),
-                engine_running=engine_running,
-                engine_rpm=engine.get("rpm"),
-                engine_load=engine.get("load"),
-                coolant_temp=engine.get("coolant_temp"),
-                oil_temp=engine.get("oil_temp"),
-                intake_air_temp=engine.get("intake_air_temp"),
-                consumption_lh=fuel.get("consumption_lh"),
-                consumption_l100km=fuel.get("consumption_l100km"),
-                maf=fuel.get("maf"),
-                fuel_type=fuel.get("type"),
-                speed=t.get("speed"),
-            )
-            db.session.add(live_row)
+        live_row.battery_voltage = battery.get("battery_voltage")
+        live_row.battery_health = battery.get("health")
+        live_row.engine_running = engine_running
+        live_row.engine_rpm = engine.get("rpm")
+        live_row.engine_load = engine.get("load")
+        live_row.coolant_temp = engine.get("coolant_temp")
+        live_row.oil_temp = engine.get("oil_temp")
+        live_row.intake_air_temp = engine.get("intake_air_temp")
+        live_row.consumption_lh = fuel.get("consumption_lh")
+        live_row.consumption_l100km = fuel.get("consumption_l100km")
+        live_row.maf = fuel.get("maf")
+        live_row.fuel_type = fuel.get("type")
+        live_row.speed = t.get("speed")
+        live_row.created_at = current_time
 
         db.session.commit()
         print(f"✅ Telemetry saved for vehicle_id: {vehicle_id} (live + history) with trip_id: {trip_id}")
-        
+
     except Exception as e:
         db.session.rollback()
         print(f"❌ Error saving telemetry: {e}")
@@ -3474,6 +3471,105 @@ def receive_location():
         print("❌ LOCATION ERROR:", e)
         return jsonify({"error": str(e)}), 500
 
+
+@app.route("/api/vehicle/<string:vin>/odometer", methods=["GET"])
+@jwt_required()
+def get_vehicle_odometer(vin):
+    try:
+        user_id = int(get_jwt_identity())
+        user = User.query.get(user_id)
+        if not user:
+            return jsonify({"error": "User not found"}), 404
+
+        vehicle = Vehicle.query.filter_by(vin=vin.upper()).first()
+        if not vehicle:
+            return jsonify({"error": "Vehicle not found"}), 404
+
+        if user.role != "admin":
+            user_vehicle = UserVehicle.query.filter_by(user_id=user_id, vehicle_id=vehicle.id).first()
+            if not user_vehicle:
+                return jsonify({"error": "Vehicle not owned by user"}), 403
+
+        live_row = VehicleTelemetryLive.query.filter_by(vehicle_id=vehicle.id).first()
+        if not live_row:
+            return jsonify({
+                "status": "success",
+                "vin": vehicle.vin,
+                "vehicle_id": vehicle.id,
+                "odometer": None,
+                "odometer_source": "rpi"
+            }), 200
+
+        return jsonify({
+            "status": "success",
+            "vin": vehicle.vin,
+            "vehicle_id": vehicle.id,
+            "odometer": live_row.odometer,
+            "odometer_source": live_row.odometer_source or "rpi"
+        }), 200
+
+    except Exception as e:
+        print("❌ GET VEHICLE ODOMETER ERROR:", e)
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route("/api/vehicle/<string:vin>/odometer", methods=["PUT"])
+@jwt_required()
+def update_vehicle_odometer(vin):
+    try:
+        user_id = int(get_jwt_identity())
+        user = User.query.get(user_id)
+        if not user:
+            return jsonify({"error": "User not found"}), 404
+
+        vehicle = Vehicle.query.filter_by(vin=vin.upper()).first()
+        if not vehicle:
+            return jsonify({"error": "Vehicle not found"}), 404
+
+        if user.role != "admin":
+            user_vehicle = UserVehicle.query.filter_by(user_id=user_id, vehicle_id=vehicle.id).first()
+            if not user_vehicle:
+                return jsonify({"error": "Vehicle not owned by user"}), 403
+
+        payload = request.get_json()
+        odometer_source = (payload.get("odometer_source") or "").strip().lower()
+        odometer_value = payload.get("odometer")
+
+        if odometer_source not in {"manual", "rpi"}:
+            return jsonify({"error": "odometer_source must be 'manual' or 'rpi'"}), 400
+
+        live_row = VehicleTelemetryLive.query.filter_by(vehicle_id=vehicle.id).first()
+        if not live_row:
+            live_row = VehicleTelemetryLive(vehicle_id=vehicle.id)
+            db.session.add(live_row)
+            db.session.flush()
+
+        live_row.odometer_source = odometer_source
+
+        if odometer_source == "manual":
+            if odometer_value is None:
+                return jsonify({"error": "Missing odometer for manual source"}), 400
+
+            try:
+                live_row.odometer = int(round(float(odometer_value)))
+            except (TypeError, ValueError):
+                return jsonify({"error": "odometer must be a number"}), 400
+
+        db.session.commit()
+
+        return jsonify({
+            "status": "success",
+            "vin": vehicle.vin,
+            "vehicle_id": vehicle.id,
+            "odometer": live_row.odometer,
+            "odometer_source": live_row.odometer_source
+        }), 200
+
+    except Exception as e:
+        db.session.rollback()
+        print("❌ UPDATE VEHICLE ODOMETER ERROR:", e)
+        return jsonify({"error": str(e)}), 500
+
 # =========================
 # DTC HISTORY (simple)
 # =========================
@@ -3551,7 +3647,8 @@ def get_device_odometer(device_id):
         "status": "success", 
         "device_id": device_id,
         "vehicle_id": t.vehicle_id,  # 🔥 Pridaj vehicle_id do odpovede
-        "odometer": int(t.odometer), 
+        "odometer": int(t.odometer),
+        "odometer_source": t.odometer_source or "rpi",
         "timestamp": _iso(t.created_at)
     }), 200
 @app.route("/api/device/<int:device_id>/battery", methods=["GET"])
@@ -3737,6 +3834,7 @@ def get_device_live(device_id):
             "device_id": device_id,
             "vehicle_id": vehicle_id,
             "odometer": live.odometer,
+            "odometer_source": live.odometer_source or "rpi",
             "battery": {
                 "voltage": live.battery_voltage,
                 "health": live.battery_health
@@ -3845,6 +3943,7 @@ def vehicles_telemetry_comparison():
                     "max_rpm": stats.max_rpm if stats and stats.max_rpm else None,
                     "min_rpm": stats.min_rpm if stats and stats.min_rpm else None,
                     "total_odometer": live.odometer if live else None,
+                    "odometer_source": (live.odometer_source if live and live.odometer_source else "rpi"),
                     "samples": stats.samples if stats and stats.samples else 0
                 }
             })
