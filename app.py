@@ -164,6 +164,7 @@ class Device(db.Model):
     id = db.Column(db.Integer, primary_key=True)
     user_id = db.Column(db.Integer, db.ForeignKey("users.id"), nullable=True)
     status = db.Column(db.Boolean, default=False)  # True = online
+    last_seen = db.Column(db.DateTime, nullable=True)
     link = db.relationship("DeviceVehicle", backref="device", lazy=True, cascade="all, delete")
 
 class DeviceVehicle(db.Model):
@@ -414,6 +415,31 @@ ALLOWED_DRIVING_EVENT_TYPES = {
     "CRASH",
 }
 
+DEVICE_ONLINE_TIMEOUT_SECONDS = 120
+
+
+def mark_device_online(device):
+    mark_device_online(device)
+    device.last_seen = datetime.utcnow()
+
+
+def refresh_stale_device_statuses():
+    cutoff = datetime.utcnow() - timedelta(seconds=DEVICE_ONLINE_TIMEOUT_SECONDS)
+
+    stale_devices = Device.query.filter(
+        Device.status == True,
+        Device.last_seen.isnot(None),
+        Device.last_seen < cutoff
+    ).all()
+
+    changed = False
+    for device in stale_devices:
+        device.status = False
+        changed = True
+
+    if changed:
+        db.session.commit()
+
 
 def serialize_driving_event(event: DrivingEvent) -> dict:
     return {
@@ -649,7 +675,7 @@ def receive_driving_event():
         )
 
         db.session.add(new_event)
-        device.status = True
+        mark_device_online(device)
         db.session.commit()
 
         event_payload = serialize_driving_event(new_event)
@@ -855,6 +881,8 @@ def get_device_events(device_id):
         description: Server error
     """
     try:
+        refresh_stale_device_statuses()
+
         user_id = int(get_jwt_identity())
         user = User.query.get(user_id)
         if not user:
@@ -930,6 +958,8 @@ def get_vehicle_events(vin):
         description: Server error
     """
     try:
+        refresh_stale_device_statuses()
+
         user_id = int(get_jwt_identity())
         user = User.query.get(user_id)
         if not user:
@@ -1123,6 +1153,8 @@ def dashboard_summary():
         description: Dashboard summary
     """
     try:
+        refresh_stale_device_statuses()
+
         user_id = int(get_jwt_identity())
         user = User.query.get(user_id)
 
@@ -1236,6 +1268,8 @@ def get_vehicle_trips(vin):
         description: Zoznam jázd
     """
     try:
+        refresh_stale_device_statuses()
+
         user_id = int(get_jwt_identity())
         user = User.query.get(user_id)
         if not user:
@@ -1603,7 +1637,7 @@ def ws_telemetry(data):
 
     # mark device online (keď posiela telemetry, je online)
     try:
-        device.status = True
+        mark_device_online(device)
         db.session.commit()
     except Exception:
         db.session.rollback()
@@ -1763,7 +1797,7 @@ def device_connect_ack():
         if not device:
             return jsonify({"error": "device not found"}), 404
 
-        device.status = True
+        mark_device_online(device)
         db.session.commit()
 
         return jsonify({"status": "online", "device_id": device_id, "handshake": "ACK-complete"}), 200
@@ -2383,6 +2417,8 @@ def device_diagnostics(device_id):
         description: Server error
     """
     try:
+        refresh_stale_device_statuses()
+
         user_id = int(get_jwt_identity())
         user = User.query.get(user_id)
         if not user:
@@ -2509,6 +2545,8 @@ def my_devices():
         description: Server error
     """
     try:
+        refresh_stale_device_statuses()
+
         user_id = int(get_jwt_identity())
         user = User.query.get(user_id)
         if not user:
@@ -2880,10 +2918,10 @@ def heartbeat():
 
         device = Device.query.get(device_id)
         if not device:
-            device = Device(id=device_id, status=True)
+            device = Device(id=device_id, status=True, last_seen=datetime.utcnow())
             db.session.add(device)
         else:
-            device.status = True
+            mark_device_online(device)
         db.session.commit()
 
         cmd = PendingCommand.query.filter_by(device_id=device_id, executed=False).first()
@@ -3137,7 +3175,7 @@ def receive_can_packet():
                 }), 400
                 
             t = _telemetry_payload(int(device_id), payload)
-            device.status = True
+            mark_device_online(device)
             db.session.commit()
         
             _save_telemetry_to_db(int(device_id), t)  # Tvoja upravená funkcia
@@ -3207,7 +3245,7 @@ def receive_can_packet():
                 if updated:
                     db.session.commit()
         
-            device.status = True
+            mark_device_online(device)
         
             # 🔥 TVORBA DeviceVehicle (už existuje)
             state = DeviceVehicle.query.filter_by(device_id=device_id).first()
@@ -3409,7 +3447,7 @@ def receive_location():
                 "message": "Please send VIN first"
             }), 400
 
-        device.status = True
+        mark_device_online(device)
         db.session.commit()
 
         ws_payload = {
@@ -3741,6 +3779,8 @@ def vehicles_telemetry_comparison():
         Admin vidí všetky vozidlá.
     """
     try:
+        refresh_stale_device_statuses()
+
         user_id = int(get_jwt_identity())
         user = User.query.get(user_id)
         if not user:
