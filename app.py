@@ -419,7 +419,7 @@ DEVICE_ONLINE_TIMEOUT_SECONDS = 120
 
 
 def mark_device_online(device):
-    mark_device_online(device)
+    device.status = True
     device.last_seen = datetime.utcnow()
 
 
