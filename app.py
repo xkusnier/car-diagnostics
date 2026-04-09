@@ -3860,7 +3860,6 @@ def get_device_live(device_id):
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
-
 @app.route("/api/vehicles/telemetry-comparison", methods=["GET"])
 @jwt_required()
 def vehicles_telemetry_comparison():
@@ -3887,38 +3886,43 @@ def vehicles_telemetry_comparison():
         vehicles_data = []
         online_count = 0
 
+        # 1. Načítaj vozidlá používateľa
         if user.role == "admin":
             vehicles = Vehicle.query.all()
+            devices = Device.query.all()
         else:
             user_vehicles = UserVehicle.query.filter_by(user_id=user_id).all()
             vehicles = [uv.vehicle for uv in user_vehicles]
+            devices = Device.query.filter_by(user_id=user_id).all()
 
+        # 2. Sprav mapu vehicle_id -> device
+        # rovnaký princíp ako my_devices: status berieme priamo zo zariadenia
+        vehicle_device_map = {}
+
+        for d in devices:
+            if d.link and len(d.link) > 0 and d.link[0].last_vin_id:
+                vehicle_id = d.link[0].last_vin_id
+
+                # ak je k vozidlu viac zariadení, preferuj online zariadenie
+                existing = vehicle_device_map.get(vehicle_id)
+                if existing is None:
+                    vehicle_device_map[vehicle_id] = d
+                else:
+                    if not existing.status and d.status:
+                        vehicle_device_map[vehicle_id] = d
+
+        # 3. Poskladaj odpoveď pre vehicles
         for vehicle in vehicles:
             owner_links = UserVehicle.query.filter_by(vehicle_id=vehicle.id).all()
             owner_user_ids = [link.user_id for link in owner_links]
             primary_user_id = owner_user_ids[0] if owner_user_ids else None
 
-            # aktuálne zariadenie priradené k vozidlu
-            device_vehicle = (
-                db.session.query(DeviceVehicle)
-                .join(Device, Device.id == DeviceVehicle.device_id)
-                .filter(
-                    DeviceVehicle.last_vin_id == vehicle.id,
-                    Device.user_id == user_id
-                )
-                .order_by(DeviceVehicle.updated_at.desc())
-                .first()
-            )
-            device_status = False
-            device_id = None
+            linked_device = vehicle_device_map.get(vehicle.id)
+            device_status = linked_device.status if linked_device else False
+            device_id = linked_device.id if linked_device else None
 
-            if device_vehicle:
-                device = Device.query.get(device_vehicle.device_id)
-                if device:
-                    device_status = device.status
-                    device_id = device.id
-                    if device_status:
-                        online_count += 1
+            if device_status:
+                online_count += 1
 
             # štatistiky z history tabuľky
             stats = db.session.query(
@@ -3946,11 +3950,11 @@ def vehicles_telemetry_comparison():
                 "user_id": primary_user_id,
                 "owner_user_ids": owner_user_ids,
                 "statistics": {
-                    "avg_rpm": round(stats.avg_rpm) if stats and stats.avg_rpm else None,
-                    "avg_speed": round(stats.avg_speed) if stats and stats.avg_speed else None,
-                    "avg_consumption": round(stats.avg_consumption, 1) if stats and stats.avg_consumption else None,
-                    "max_rpm": stats.max_rpm if stats and stats.max_rpm else None,
-                    "min_rpm": stats.min_rpm if stats and stats.min_rpm else None,
+                    "avg_rpm": round(stats.avg_rpm) if stats and stats.avg_rpm is not None else None,
+                    "avg_speed": round(stats.avg_speed) if stats and stats.avg_speed is not None else None,
+                    "avg_consumption": round(stats.avg_consumption, 1) if stats and stats.avg_consumption is not None else None,
+                    "max_rpm": stats.max_rpm if stats and stats.max_rpm is not None else None,
+                    "min_rpm": stats.min_rpm if stats and stats.min_rpm is not None else None,
                     "total_odometer": live.odometer if live else None,
                     "odometer_source": (live.odometer_source if live and live.odometer_source else "rpi"),
                     "samples": stats.samples if stats and stats.samples else 0
@@ -3972,7 +3976,6 @@ def vehicles_telemetry_comparison():
     except Exception as e:
         print("❌ VEHICLES TELEMETRY COMPARISON ERROR:", e)
         return jsonify({"error": str(e)}), 500
-
 # SHOW ALL
 # =========================
 @app.route("/api/all", methods=["GET"])
