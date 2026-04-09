@@ -1493,7 +1493,7 @@ def _save_telemetry_to_db(device_id: int, t: dict) -> None:
 
             if trip_samples:
                 # Priemerná rýchlosť (len keď speed > 0)
-                speeds = [s.speed for s in trip_samples if s.speed and s.speed > 0]
+                speeds = [s.speed for s in trip_samples if s.speed is not None]
                 if speeds:
                     active_trip.avg_speed = sum(speeds) / len(speeds)
 
