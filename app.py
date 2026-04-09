@@ -3899,7 +3899,16 @@ def vehicles_telemetry_comparison():
             primary_user_id = owner_user_ids[0] if owner_user_ids else None
 
             # aktuálne zariadenie priradené k vozidlu
-            device_vehicle = DeviceVehicle.query.filter_by(last_vin_id=vehicle.id).first()
+            device_vehicle = (
+                db.session.query(DeviceVehicle)
+                .join(Device, Device.id == DeviceVehicle.device_id)
+                .filter(
+                    DeviceVehicle.last_vin_id == vehicle.id,
+                    Device.user_id == user_id
+                )
+                .order_by(DeviceVehicle.updated_at.desc())
+                .first()
+            )
             device_status = False
             device_id = None
 
