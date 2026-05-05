@@ -17,6 +17,7 @@ import re
 import smtplib
 from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
+import threading
 eventlet.monkey_patch()
 
 app = Flask(__name__)
@@ -3397,13 +3398,17 @@ def receive_can_packet():
             for owner_link in owner_links:
                 owner = User.query.get(owner_link.user_id)
                 if owner and owner.email:
-                    send_dtc_email_notification(
-                        user_email=owner.email,
-                        vehicle=vehicle,
-                        dtc_code=dtc_code,
-                        description=description,
-                        severity=severity
-                    )
+                    threading.Thread(
+                        target=send_dtc_email_notification,
+                        kwargs={
+                            "user_email": owner.email,
+                            "vehicle": vehicle,
+                            "dtc_code": dtc_code,
+                            "description": description,
+                            "severity": severity,
+                        },
+                        daemon=True
+                    ).start()
             
             # ✅ PRIDAJ TOTO - WebSocket pre read DTC
             socketio.emit("dtc_update", {
