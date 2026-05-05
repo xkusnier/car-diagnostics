@@ -1,3 +1,6 @@
+import eventlet
+eventlet.monkey_patch()
+
 from flask import Flask, request, jsonify
 from flask_sqlalchemy import SQLAlchemy
 from flasgger import Swagger
@@ -12,9 +15,7 @@ from flask_jwt_extended import JWTManager, create_access_token, jwt_required, ge
 from sqlalchemy import func, or_
 # ✅ NEW: WebSocket (Socket.IO)
 from flask_socketio import SocketIO, emit, join_room
-import eventlet
 import re
-eventlet.monkey_patch()
 
 app = Flask(__name__)
 CORS(app, origins=[
