@@ -1132,16 +1132,29 @@ def get_recommended_action(severity: str) -> str:
 
     return "Visit a service center soon"
 def send_dtc_email_notification(user_email: str, vehicle_info: dict, dtc_code: str, description: str, severity: str):
+    """Pošle DTC notifikáciu cez Brevo Transactional Email API.
+
+    Nepoužíva SMTP porty, ale HTTPS request na Brevo API, takže je vhodné aj pre Render Free.
+    V Renderi nastav minimálne BREVO_API_KEY a BREVO_SENDER_EMAIL.
+    """
     try:
         brevo_api_key = os.environ.get("BREVO_API_KEY")
-        sender_email = os.environ.get("SMTP_SENDER", "kusnier.jozo@gmail.com")
+        sender_email = (
+            os.environ.get("BREVO_SENDER_EMAIL")
+            or os.environ.get("SMTP_SENDER")
+            or "kusnier.jozo@gmail.com"
+        )
+        sender_name = os.environ.get("BREVO_SENDER_NAME", "Car-Diagnostics")
 
-        if not brevo_api_key or not sender_email:
-            print("⚠️ Brevo API is not configured, skipping email notification")
+        if not brevo_api_key:
+            print("⚠️ BREVO_API_KEY is not configured, skipping email notification")
+            return
+
+        if not sender_email:
+            print("⚠️ BREVO_SENDER_EMAIL is not configured, skipping email notification")
             return
 
         recommended_action = get_recommended_action(severity)
-
         subject = f"Car-Diagnostics alert: {dtc_code} ({severity.upper()})"
 
         text_content = f"""
@@ -1160,11 +1173,11 @@ Severity: {severity.upper()}
 Recommended action: {recommended_action}
 
 This is an automatic notification from Car-Diagnostics.
-"""
+""".strip()
 
         payload = {
             "sender": {
-                "name": "Car-Diagnostics",
+                "name": sender_name,
                 "email": sender_email
             },
             "to": [
