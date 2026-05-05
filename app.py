@@ -1174,7 +1174,7 @@ This is an automatic notification from Car-Diagnostics.
         message["Subject"] = subject
         message.attach(MIMEText(body, "plain", "utf-8"))
 
-        with smtplib.SMTP(smtp_host, smtp_port) as server:
+        with smtplib.SMTP(smtp_host, smtp_port, timeout=10) as server:
             server.starttls()
             server.login(smtp_user, smtp_password)
             server.sendmail(smtp_sender, user_email, message.as_string())
