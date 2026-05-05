@@ -1137,21 +1137,18 @@ def get_recommended_action(severity: str) -> str:
     return "Visit a service center soon"
 def send_dtc_email_notification(user_email: str, vehicle: Vehicle, dtc_code: str, description: str, severity: str):
     try:
-        smtp_host = os.environ.get("SMTP_HOST")
-        smtp_port = int(os.environ.get("SMTP_PORT", "587"))
-        smtp_user = os.environ.get("SMTP_USER")
-        smtp_password = os.environ.get("SMTP_PASSWORD")
-        smtp_sender = os.environ.get("SMTP_SENDER", smtp_user)
+        brevo_api_key = os.environ.get("BREVO_API_KEY")
+        sender_email = os.environ.get("SMTP_SENDER", "kusnier.jozo@gmail.com")
 
-        if not smtp_host or not smtp_user or not smtp_password or not smtp_sender:
-            print("⚠️ SMTP is not configured, skipping email notification")
+        if not brevo_api_key or not sender_email:
+            print("⚠️ Brevo API is not configured, skipping email notification")
             return
 
         recommended_action = get_recommended_action(severity)
 
         subject = f"Car-Diagnostics alert: {dtc_code} ({severity.upper()})"
 
-        body = f"""
+        text_content = f"""
 Car-Diagnostics detected a diagnostic trouble code on your vehicle.
 
 Vehicle:
@@ -1169,16 +1166,34 @@ Recommended action: {recommended_action}
 This is an automatic notification from Car-Diagnostics.
 """
 
-        message = MIMEMultipart()
-        message["From"] = smtp_sender
-        message["To"] = user_email
-        message["Subject"] = subject
-        message.attach(MIMEText(body, "plain", "utf-8"))
+        payload = {
+            "sender": {
+                "name": "Car-Diagnostics",
+                "email": sender_email
+            },
+            "to": [
+                {
+                    "email": user_email
+                }
+            ],
+            "subject": subject,
+            "textContent": text_content
+        }
 
-        with smtplib.SMTP(smtp_host, smtp_port, timeout=10) as server:
-            server.starttls()
-            server.login(smtp_user, smtp_password)
-            server.sendmail(smtp_sender, user_email, message.as_string())
+        response = requests.post(
+            "https://api.brevo.com/v3/smtp/email",
+            headers={
+                "accept": "application/json",
+                "api-key": brevo_api_key,
+                "content-type": "application/json"
+            },
+            json=payload,
+            timeout=10
+        )
+
+        if response.status_code not in (200, 201, 202):
+            print(f"❌ BREVO API ERROR {response.status_code}: {response.text}")
+            return
 
         print(f"✅ DTC email notification sent to {user_email}")
 
