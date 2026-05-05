@@ -17,7 +17,6 @@ import re
 import smtplib
 from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
-import threading
 eventlet.monkey_patch()
 
 app = Flask(__name__)
@@ -1135,7 +1134,7 @@ def get_recommended_action(severity: str) -> str:
         return "Stop immediately and do not continue driving"
 
     return "Visit a service center soon"
-def send_dtc_email_notification(user_email: str, vehicle: Vehicle, dtc_code: str, description: str, severity: str):
+def send_dtc_email_notification(user_email: str, vehicle_info: dict, dtc_code: str, description: str, severity: str):
     try:
         brevo_api_key = os.environ.get("BREVO_API_KEY")
         sender_email = os.environ.get("SMTP_SENDER", "kusnier.jozo@gmail.com")
@@ -1152,10 +1151,10 @@ def send_dtc_email_notification(user_email: str, vehicle: Vehicle, dtc_code: str
 Car-Diagnostics detected a diagnostic trouble code on your vehicle.
 
 Vehicle:
-VIN: {vehicle.vin}
-Brand: {vehicle.brand or "Unknown"}
-Model: {vehicle.model or "Unknown"}
-Year: {vehicle.year or "Unknown"}
+VIN: {vehicle_info.get("vin")}
+Brand: {vehicle_info.get("brand") or "Unknown"}
+Model: {vehicle_info.get("model") or "Unknown"}
+Year: {vehicle_info.get("year") or "Unknown"}
 
 Detected fault:
 DTC code: {dtc_code}
@@ -3410,20 +3409,24 @@ def receive_can_packet():
             
             owner_links = UserVehicle.query.filter_by(vehicle_id=vehicle.id).all()
             
+            vehicle_info = {
+                "vin": vehicle.vin,
+                "brand": vehicle.brand,
+                "model": vehicle.model,
+                "year": vehicle.year,
+            }
+            
             for owner_link in owner_links:
                 owner = User.query.get(owner_link.user_id)
                 if owner and owner.email:
-                    threading.Thread(
-                        target=send_dtc_email_notification,
-                        kwargs={
-                            "user_email": owner.email,
-                            "vehicle": vehicle,
-                            "dtc_code": dtc_code,
-                            "description": description,
-                            "severity": severity,
-                        },
-                        daemon=True
-                    ).start()
+                    socketio.start_background_task(
+                        send_dtc_email_notification,
+                        owner.email,
+                        vehicle_info,
+                        dtc_code,
+                        description,
+                        severity
+                    )
             
             # ✅ PRIDAJ TOTO - WebSocket pre read DTC
             socketio.emit("dtc_update", {
