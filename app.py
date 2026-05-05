@@ -14,6 +14,9 @@ from sqlalchemy import func, or_
 from flask_socketio import SocketIO, emit, join_room
 import eventlet
 import re
+import smtplib
+from email.mime.text import MIMEText
+from email.mime.multipart import MIMEMultipart
 eventlet.monkey_patch()
 
 app = Flask(__name__)
@@ -1119,7 +1122,67 @@ def detect_severity_from_description(description: str) -> str:
         if word in text:
             return "low"
     return "medium"
+    
+def get_recommended_action(severity: str) -> str:
+    severity = (severity or "medium").lower()
 
+    if severity == "low":
+        return "Continue driving and monitor the vehicle"
+    if severity == "medium":
+        return "Visit a service center soon"
+    if severity == "critical":
+        return "Stop immediately and do not continue driving"
+
+    return "Visit a service center soon"
+def send_dtc_email_notification(user_email: str, vehicle: Vehicle, dtc_code: str, description: str, severity: str):
+    try:
+        smtp_host = os.environ.get("SMTP_HOST")
+        smtp_port = int(os.environ.get("SMTP_PORT", "587"))
+        smtp_user = os.environ.get("SMTP_USER")
+        smtp_password = os.environ.get("SMTP_PASSWORD")
+        smtp_sender = os.environ.get("SMTP_SENDER", smtp_user)
+
+        if not smtp_host or not smtp_user or not smtp_password or not smtp_sender:
+            print("⚠️ SMTP is not configured, skipping email notification")
+            return
+
+        recommended_action = get_recommended_action(severity)
+
+        subject = f"Car-Diagnostics alert: {dtc_code} ({severity.upper()})"
+
+        body = f"""
+Car-Diagnostics detected a diagnostic trouble code on your vehicle.
+
+Vehicle:
+VIN: {vehicle.vin}
+Brand: {vehicle.brand or "Unknown"}
+Model: {vehicle.model or "Unknown"}
+Year: {vehicle.year or "Unknown"}
+
+Detected fault:
+DTC code: {dtc_code}
+Description: {description or "No description available"}
+Severity: {severity.upper()}
+Recommended action: {recommended_action}
+
+This is an automatic notification from Car-Diagnostics.
+"""
+
+        message = MIMEMultipart()
+        message["From"] = smtp_sender
+        message["To"] = user_email
+        message["Subject"] = subject
+        message.attach(MIMEText(body, "plain", "utf-8"))
+
+        with smtplib.SMTP(smtp_host, smtp_port) as server:
+            server.starttls()
+            server.login(smtp_user, smtp_password)
+            server.sendmail(smtp_sender, user_email, message.as_string())
+
+        print(f"✅ DTC email notification sent to {user_email}")
+
+    except Exception as e:
+        print(f"❌ EMAIL NOTIFICATION ERROR for {user_email}: {e}")
 # =========================
 # ✅ NEW: SOCKET.IO HELPERS
 # =========================
@@ -2458,6 +2521,7 @@ def device_diagnostics(device_id):
                     "dtc_code": d.dtc_code,
                     "description": d.dtc_description or "No description",
                     "severity": d.severity or "medium",
+                    "recommended_action": get_recommended_action(d.severity or "medium"),
                     "created_at": d.created_at.isoformat() if d.created_at else None,
                 } for d in dtcs_query]
 
@@ -3319,24 +3383,45 @@ def receive_can_packet():
         
             description = meaning.dtc_description if meaning else ""
             severity = detect_severity_from_description(description)
-        
+            recommended_action = get_recommended_action(severity)
+            
             db.session.add(DTCCodeHistory(vin_id=vehicle.id, dtc_code=dtc_code, severity=severity))
-        
+            
             DTCCodeActive.query.filter_by(vin_id=vehicle.id, dtc_code=dtc_code).delete()
             db.session.add(DTCCodeActive(vin_id=vehicle.id, dtc_code=dtc_code, severity=severity))
-        
+            
             db.session.commit()
+            
+            owner_links = UserVehicle.query.filter_by(vehicle_id=vehicle.id).all()
+            
+            for owner_link in owner_links:
+                owner = User.query.get(owner_link.user_id)
+                if owner and owner.email:
+                    send_dtc_email_notification(
+                        user_email=owner.email,
+                        vehicle=vehicle,
+                        dtc_code=dtc_code,
+                        description=description,
+                        severity=severity
+                    )
             
             # ✅ PRIDAJ TOTO - WebSocket pre read DTC
             socketio.emit("dtc_update", {
                 "device_id": device_id,
                 "dtc_code": dtc_code,
                 "severity": severity,
+                "recommended_action": recommended_action,
                 "description": description,
                 "timestamp": datetime.utcnow().isoformat()
             })
         
-            return jsonify({"status": "DTC stored", "vin": vehicle.vin, "dtc": dtc_code, "severity": severity}), 201
+            return jsonify({
+                "status": "DTC stored",
+                "vin": vehicle.vin,
+                "dtc": dtc_code,
+                "severity": severity,
+                "recommended_action": recommended_action
+            }), 201
         return jsonify({"status": "ignored", "message": "No recognized payload fields"}), 200
 
     except Exception as e:
