@@ -14,9 +14,6 @@ from sqlalchemy import func, or_
 from flask_socketio import SocketIO, emit, join_room
 import eventlet
 import re
-import smtplib
-from email.mime.text import MIMEText
-from email.mime.multipart import MIMEMultipart
 eventlet.monkey_patch()
 
 app = Flask(__name__)
