@@ -1,63 +1,71 @@
-import eventlet
-eventlet.monkey_patch()
-
 import os
 from datetime import timedelta
-from flask import Flask, request, jsonify
+
+# Eventlet je volitelny. Bez tejto ochrany aplikacia spadne hned pri importe,
+# ak lokalne alebo na hostingu nie je nainstalovany/kompatibilny eventlet.
+try:
+    import eventlet
+    eventlet.monkey_patch()
+    SOCKETIO_ASYNC_MODE = "eventlet"
+except Exception:
+    SOCKETIO_ASYNC_MODE = "threading"
+
+from flask import Flask, request, jsonify, redirect
 from flask_cors import CORS
 from flasgger import Swagger
 from extensions import db, jwt, socketio
 
-SWAGGER_CONFIG = {
-    'title': 'Inteligentna diagnostika API',
-    'uiversion': 3,
-    'openapi': '3.0.2',
-    'doc_expansion': 'list',
-    'description': '''
-        API pre bakalarsku pracu - diagnostika vozidiel
-        ## Testovanie cez Postman
-        Vsetky endpointy je mozne testovat v Postmane podla nasledujucich prikladov:
-        ### Autentifikacia
-        1. Zaregistruj sa: `POST /api/register`
-        2. Prihlas sa: `POST /api/login` -> ziskas JWT token
-        3. Pre autorizovane endpointy pridaj header: `Authorization: Bearer <token>`
-        ### Zariadenia
-        - Pridanie zariadenia: `POST /api/add-device` s JSON body `{"device_id": 12345}`
-        - Zoznam mojich zariadeni: `GET /api/my-devices`
-        - Diagnostika: `GET /api/device/12345/diagnostics`
-        ### Komunikacia s RPi
-        - Heartbeat: `POST /api/heartbeat` s JSON `{"device_id": 12345}`
-        - Trigger prikazu: `POST /api/trigger` s JSON `{"device_id": 12345, "command": "GET_VIN"}`
-        - CAN packet: `POST /api/can` s JSON `{"device_id": 12345, "vin": "1HGCM82633A123456"}`
-    ''',
-    'version': '1.0.0',
-    'termsOfService': '',
-    'contact': {
-        'name': 'Jozef Kusnier',
-        'email': '120957@stuba.sk'
-    },
-    'license': {
-        'name': 'MIT'
-    },
-    'servers': [
-        {
-            'url': 'https://car-diagnostics.onrender.com',
-            'description': 'Render server'
+SWAGGER_TEMPLATE = {
+    "openapi": "3.0.2",
+    "info": {
+        "title": "Inteligentna diagnostika API",
+        "version": "1.0.0",
+        "description": """
+API pre bakalarsku pracu - diagnostika vozidiel.
+
+## Testovanie cez Postman
+1. Zaregistruj sa: `POST /api/register`
+2. Prihlas sa: `POST /api/login` a ziskas JWT token
+3. Pre autorizovane endpointy pridaj header: `Authorization: Bearer <token>`
+
+Swagger UI je dostupne na `/apidocs`.
+        """,
+        "contact": {
+            "name": "Jozef Kusnier",
+            "email": "120957@stuba.sk"
         },
-        {
-            'url': 'http://localhost:5000',
-            'description': 'Local development'
-        }
+        "license": {"name": "MIT"}
+    },
+    "servers": [
+        {"url": "https://car-diagnostics.onrender.com", "description": "Render server"},
+        {"url": "http://localhost:5000", "description": "Local development"}
     ],
-    'components': {
-        'securitySchemes': {
-            'bearerAuth': {
-                'type': 'http',
-                'scheme': 'bearer',
-                'bearerFormat': 'JWT'
+    "components": {
+        "securitySchemes": {
+            "bearerAuth": {
+                "type": "http",
+                "scheme": "bearer",
+                "bearerFormat": "JWT"
             }
         }
     }
+}
+
+SWAGGER_CONFIG = {
+    "headers": [],
+    "specs": [
+        {
+            "endpoint": "apispec_1",
+            "route": "/apispec_1.json",
+            "rule_filter": lambda rule: True,
+            "model_filter": lambda tag: True,
+        }
+    ],
+    "static_url_path": "/flasgger_static",
+    "swagger_ui": True,
+    "specs_route": "/apidocs/",
+    "title": "Inteligentna diagnostika API",
+    "uiversion": 3,
 }
 
 def create_app():
@@ -72,7 +80,7 @@ def create_app():
     @app.before_request
     def ensure_json_content_type():
         if request.method in ['POST', 'PUT', 'PATCH']:
-            if request.method == 'OPTIONS':
+            if request.path.startswith('/apidocs') or request.path.startswith('/apispec'):
                 return
             if not request.is_json:
                 return jsonify({
@@ -112,8 +120,8 @@ def create_app():
 
     db.init_app(app)
     jwt.init_app(app)
-    Swagger(app, template=app.config['SWAGGER'])
-    socketio.init_app(app, cors_allowed_origins="*", async_mode="eventlet")
+    Swagger(app, template=SWAGGER_TEMPLATE, config=SWAGGER_CONFIG)
+    socketio.init_app(app, cors_allowed_origins="*", async_mode=SOCKETIO_ASYNC_MODE)
 
     from routes.system import bp as system_bp
     from routes.users import bp as users_bp
@@ -140,6 +148,19 @@ def create_app():
     app.register_blueprint(telemetry_bp)
 
     import websocket_events
+
+    @app.get('/swagger')
+    @app.get('/docs')
+    @app.get('/api/docs')
+    def swagger_alias():
+        return redirect('/apidocs/')
+
+    # Pri spusteni cez gunicorn sa blok __main__ nevykona, preto tabulky
+    # vytvorime aj pri importe aplikacie. Na produkcii sa to da vypnut
+    # premennou AUTO_CREATE_TABLES=false.
+    if os.environ.get('AUTO_CREATE_TABLES', 'true').lower() == 'true':
+        with app.app_context():
+            db.create_all()
 
     return app
 

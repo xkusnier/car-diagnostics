@@ -322,3 +322,12 @@ def get_device_live(device_id):
         }), 200
     except Exception as e:
         return jsonify({"error": str(e)}), 500
+
+# URL rules
+bp.add_url_rule('/api/device/<int:device_id>/odometer', endpoint='get_device_odometer', view_func=jwt_required()(get_device_odometer), methods=['GET'])
+bp.add_url_rule('/api/device/<int:device_id>/battery', endpoint='get_device_battery', view_func=jwt_required()(get_device_battery), methods=['GET'])
+bp.add_url_rule('/api/device/<int:device_id>/engine', endpoint='get_device_engine', view_func=jwt_required()(get_device_engine), methods=['GET'])
+bp.add_url_rule('/api/device/<int:device_id>/fuel', endpoint='get_device_fuel', view_func=jwt_required()(get_device_fuel), methods=['GET'])
+bp.add_url_rule('/api/device/<int:device_id>/speed', endpoint='get_device_speed', view_func=jwt_required()(get_device_speed), methods=['GET'])
+bp.add_url_rule('/api/device/<int:device_id>/location', endpoint='get_device_location', view_func=jwt_required()(get_device_location), methods=['GET'])
+bp.add_url_rule('/api/device/<int:device_id>/live', endpoint='get_device_live', view_func=jwt_required()(get_device_live), methods=['GET'])

@@ -107,3 +107,6 @@ def get_vehicle_trips(vin):
     except Exception as e:
         print("❌ GET VEHICLE TRIPS ERROR:", e)
         return jsonify({"error": str(e)}), 500
+
+# URL rules
+bp.add_url_rule('/api/vehicle/<vin>/trips', endpoint='get_vehicle_trips', view_func=jwt_required()(get_vehicle_trips), methods=['GET'])

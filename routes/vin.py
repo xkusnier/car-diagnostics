@@ -87,3 +87,6 @@ def validate_vin_endpoint():
     except Exception as e:
         print("❌ VIN VALIDATION ERROR:", e)
         return jsonify({"error": str(e)}), 500
+
+# URL rules
+bp.add_url_rule('/api/validate-vin', endpoint='validate_vin_endpoint', view_func=jwt_required()(validate_vin_endpoint), methods=['POST'])

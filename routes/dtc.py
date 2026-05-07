@@ -399,3 +399,12 @@ def get_dtc_history(vin):
         "vin": vin,
         "dtc_history": [{"dtc_code": d.dtc_code, "created_at": d.created_at.isoformat()} for d in history]
     }), 200
+
+# URL rules
+bp.add_url_rule('/api/vehicle/<vin>/dtc-patterns', endpoint='check_dtc_patterns', view_func=jwt_required()(check_dtc_patterns), methods=['GET'])
+bp.add_url_rule('/api/device/<int:device_id>/clear-dtcs', endpoint='clear_device_dtcs', view_func=jwt_required()(clear_device_dtcs), methods=['POST'])
+bp.add_url_rule('/api/device/<int:device_id>/read-dtcs', endpoint='read_device_dtcs', view_func=jwt_required()(read_device_dtcs), methods=['POST'])
+bp.add_url_rule('/api/dtc-history-full', endpoint='dtc_history_full', view_func=jwt_required()(dtc_history_full), methods=['GET'])
+bp.add_url_rule('/api/load-dtc-codes', endpoint='load_dtc_codes_from_csv', view_func=load_dtc_codes_from_csv, methods=['POST'])
+bp.add_url_rule('/api/dtc-description', endpoint='get_dtc_description', view_func=get_dtc_description, methods=['GET'])
+bp.add_url_rule('/api/vehicle/<vin>/dtc-history', endpoint='get_dtc_history', view_func=jwt_required()(get_dtc_history), methods=['GET'])

@@ -152,3 +152,7 @@ def register():
     except Exception as e:
         db.session.rollback()
         return jsonify({"error": str(e)}), 500
+
+# URL rules
+bp.add_url_rule('/api/login', endpoint='login', view_func=login, methods=['POST'])
+bp.add_url_rule('/api/register', endpoint='register', view_func=register, methods=['POST'])

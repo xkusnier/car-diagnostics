@@ -356,3 +356,8 @@ def get_vehicle_events(vin):
     except Exception as e:
         print("❌ GET VEHICLE EVENTS ERROR:", e)
         return jsonify({"error": str(e)}), 500
+
+# URL rules
+bp.add_url_rule('/api/driving-event', endpoint='receive_driving_event', view_func=receive_driving_event, methods=['POST'])
+bp.add_url_rule('/api/device/<int:device_id>/events', endpoint='get_device_events', view_func=jwt_required()(get_device_events), methods=['GET'])
+bp.add_url_rule('/api/vehicle/<vin>/events', endpoint='get_vehicle_events', view_func=jwt_required()(get_vehicle_events), methods=['GET'])

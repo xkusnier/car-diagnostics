@@ -707,3 +707,11 @@ def receive_location():
         db.session.rollback()
         print("❌ LOCATION ERROR:", e)
         return jsonify({"error": str(e)}), 500
+
+# URL rules
+bp.add_url_rule('/api/connect', endpoint='device_connect_syn', view_func=device_connect_syn, methods=['POST'])
+bp.add_url_rule('/api/connect/ack', endpoint='device_connect_ack', view_func=device_connect_ack, methods=['POST'])
+bp.add_url_rule('/api/heartbeat', endpoint='heartbeat', view_func=heartbeat, methods=['POST'])
+bp.add_url_rule('/api/trigger', endpoint='trigger_command', view_func=trigger_command, methods=['POST'])
+bp.add_url_rule('/api/can', endpoint='receive_can_packet', view_func=receive_can_packet, methods=['POST'])
+bp.add_url_rule('/api/location', endpoint='receive_location', view_func=receive_location, methods=['POST'])

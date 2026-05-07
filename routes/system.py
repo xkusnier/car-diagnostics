@@ -116,3 +116,12 @@ def show_all():
     except Exception as e:
         print("❌ SHOW ALL ERROR:", e)
         return jsonify({"error": str(e)}), 500
+
+# URL rules
+bp.add_url_rule('/', endpoint='home', view_func=home, methods=['GET'])
+bp.add_url_rule('/health', endpoint='health', view_func=health_check, methods=['GET'])
+bp.add_url_rule('/api/health', endpoint='api_health', view_func=health_check, methods=['GET'])
+bp.add_url_rule('/init-db', endpoint='init_db', view_func=init_db, methods=['GET'])
+bp.add_url_rule('/api/init-db', endpoint='api_init_db', view_func=init_db, methods=['GET'])
+bp.add_url_rule('/show-all', endpoint='show_all', view_func=show_all, methods=['GET'])
+bp.add_url_rule('/api/show-all', endpoint='api_show_all', view_func=show_all, methods=['GET'])

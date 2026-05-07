@@ -99,3 +99,7 @@ def dashboard_summary():
     except Exception as e:
         print("❌ DASHBOARD SUMMARY ERROR:", e)
         return jsonify({"error": str(e)}), 500
+
+# URL rules
+bp.add_url_rule('/api/dashboard-summary', endpoint='dashboard_summary', view_func=jwt_required()(dashboard_summary), methods=['GET'])
+bp.add_url_rule('/api/dashboard/summary', endpoint='dashboard_summary_alt', view_func=jwt_required()(dashboard_summary), methods=['GET'])

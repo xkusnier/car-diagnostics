@@ -426,3 +426,10 @@ def device_offline(device_id):
     except Exception as e:
         db.session.rollback()
         return jsonify({"error": str(e)}), 500
+
+# URL rules
+bp.add_url_rule('/api/device/<int:device_id>', endpoint='delete_device', view_func=jwt_required()(delete_device), methods=['DELETE'])
+bp.add_url_rule('/api/add-device', endpoint='add_device', view_func=jwt_required()(add_device), methods=['POST'])
+bp.add_url_rule('/api/device/<int:device_id>/diagnostics', endpoint='device_diagnostics', view_func=jwt_required()(device_diagnostics), methods=['GET'])
+bp.add_url_rule('/api/my-devices', endpoint='my_devices', view_func=jwt_required()(my_devices), methods=['GET'])
+bp.add_url_rule('/api/device/<int:device_id>/offline', endpoint='device_offline', view_func=device_offline, methods=['POST'])

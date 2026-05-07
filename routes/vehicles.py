@@ -304,3 +304,9 @@ def vehicles_telemetry_comparison():
     except Exception as e:
         print("❌ VEHICLES TELEMETRY COMPARISON ERROR:", e)
         return jsonify({"error": str(e)}), 500
+
+# URL rules
+bp.add_url_rule('/api/vehicle/<vin>', endpoint='delete_user_vehicle', view_func=jwt_required()(delete_user_vehicle), methods=['DELETE'])
+bp.add_url_rule('/api/vehicle/<vin>/odometer', endpoint='get_vehicle_odometer', view_func=jwt_required()(get_vehicle_odometer), methods=['GET'])
+bp.add_url_rule('/api/vehicle/<vin>/odometer', endpoint='update_vehicle_odometer', view_func=jwt_required()(update_vehicle_odometer), methods=['PUT'])
+bp.add_url_rule('/api/vehicles/telemetry-comparison', endpoint='vehicles_telemetry_comparison', view_func=jwt_required()(vehicles_telemetry_comparison), methods=['GET'])
