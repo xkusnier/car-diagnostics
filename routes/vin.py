@@ -89,4 +89,5 @@ def validate_vin_endpoint():
         return jsonify({"error": str(e)}), 500
 
 # URL rules
-bp.add_url_rule('/api/validate-vin', endpoint='validate_vin_endpoint', view_func=jwt_required()(validate_vin_endpoint), methods=['POST'])
+bp.add_url_rule('/api/validate-vin', endpoint='validate_vin_endpoint', view_func=jwt_required(optional=True)(validate_vin_endpoint), methods=['POST'])
+bp.add_url_rule('/api/vin/validate', endpoint='validate_vin_endpoint_alt', view_func=jwt_required(optional=True)(validate_vin_endpoint), methods=['POST'])

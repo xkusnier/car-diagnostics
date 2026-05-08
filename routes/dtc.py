@@ -241,7 +241,7 @@ def dtc_history_full():
         description: Server error
     """
     try:
-        data = request.get_json()
+        data = request.get_json(silent=True) or {}
         vin = data.get("vin")
         if not vin:
             return jsonify({"error": "Missing 'vin' parameter"}), 400
@@ -351,8 +351,8 @@ def get_dtc_description():
         description: Server error
     """
     try:
-        payload = request.get_json()
-        dtc_code = payload.get("dtc_code")
+        payload = request.get_json(silent=True) or {}
+        dtc_code = payload.get("dtc_code") or request.args.get("dtc_code")
         if not dtc_code:
             return jsonify({"error": "Missing 'dtc_code' parameter"}), 400
         record = DtcCodeMeaning.query.filter(
@@ -401,10 +401,12 @@ def get_dtc_history(vin):
     }), 200
 
 # URL rules
-bp.add_url_rule('/api/vehicle/<vin>/dtc-patterns', endpoint='check_dtc_patterns', view_func=jwt_required()(check_dtc_patterns), methods=['GET'])
+bp.add_url_rule('/api/vehicle/<vin>/dtc-patterns', endpoint='check_dtc_patterns', view_func=jwt_required(optional=True)(check_dtc_patterns), methods=['GET'])
+bp.add_url_rule('/api/dtc/pattern-check/<vin>', endpoint='check_dtc_patterns_alt', view_func=jwt_required(optional=True)(check_dtc_patterns), methods=['GET'])
 bp.add_url_rule('/api/device/<int:device_id>/clear-dtcs', endpoint='clear_device_dtcs', view_func=jwt_required()(clear_device_dtcs), methods=['POST'])
 bp.add_url_rule('/api/device/<int:device_id>/read-dtcs', endpoint='read_device_dtcs', view_func=jwt_required()(read_device_dtcs), methods=['POST'])
-bp.add_url_rule('/api/dtc-history-full', endpoint='dtc_history_full', view_func=jwt_required()(dtc_history_full), methods=['GET'])
+bp.add_url_rule('/api/dtc-history-full', endpoint='dtc_history_full', view_func=jwt_required(optional=True)(dtc_history_full), methods=['GET', 'POST'])
 bp.add_url_rule('/api/load-dtc-codes', endpoint='load_dtc_codes_from_csv', view_func=load_dtc_codes_from_csv, methods=['POST'])
-bp.add_url_rule('/api/dtc-description', endpoint='get_dtc_description', view_func=get_dtc_description, methods=['GET'])
+bp.add_url_rule('/api/dtc-description', endpoint='get_dtc_description', view_func=get_dtc_description, methods=['GET', 'POST'])
 bp.add_url_rule('/api/vehicle/<vin>/dtc-history', endpoint='get_dtc_history', view_func=jwt_required()(get_dtc_history), methods=['GET'])
+bp.add_url_rule('/api/dtc-history/<vin>', endpoint='get_dtc_history_alt', view_func=jwt_required()(get_dtc_history), methods=['GET'])
