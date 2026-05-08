@@ -413,3 +413,31 @@ def _get_latest_telemetry(device_id: int) -> VehicleTelemetryLive | None:
     if not vehicle_id:
         return None
     return VehicleTelemetryLive.query.filter_by(vehicle_id=vehicle_id).first()
+
+
+# Explicit exports are needed because routes use `from utils import *`.
+# Python normally does not import names that start with `_` via star imports.
+# These helper functions are used by communication.py, telemetry.py and websocket_events.py.
+__all__ = [
+    "ALLOWED_DRIVING_EVENT_TYPES",
+    "DEVICE_ONLINE_TIMEOUT_SECONDS",
+    "VIN_TRANSLITERATION",
+    "VIN_WEIGHTS",
+    "VIN_ALLOWED_REGEX",
+    "CRITICAL_KEYWORDS",
+    "LOW_KEYWORDS",
+    "mark_device_online",
+    "refresh_stale_device_statuses",
+    "serialize_driving_event",
+    "compute_vin_check_digit",
+    "validate_vin_value",
+    "detect_severity_from_description",
+    "get_recommended_action",
+    "send_dtc_email_notification",
+    "_iso",
+    "_telemetry_payload",
+    "_save_telemetry_to_db",
+    "_save_location_to_db",
+    "_get_vehicle_id_from_device",
+    "_get_latest_telemetry",
+]
