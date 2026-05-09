@@ -8,6 +8,7 @@ from io import StringIO
 from extensions import db, socketio
 from models import *
 from utils import *
+from werkzeug.security import generate_password_hash, check_password_hash
 
 bp = Blueprint("users", __name__)
 
@@ -79,7 +80,7 @@ def login():
                 func.lower(User.username) == identifier.lower()
             )
         ).first()
-        if not user or user.password != password:
+        if not user or not check_password_hash(user.password, password):
             return jsonify({"error": "Invalid credentials"}), 401
         access_token = create_access_token(identity=str(user.id))
         return jsonify({
@@ -142,7 +143,14 @@ def register():
             return jsonify({"error": "Email already exists"}), 409
         if User.query.filter_by(username=username).first():
             return jsonify({"error": "Username already exists"}), 409
-        new_user = User(username=username, email=email, password=password, role="user")
+        hashed_password = generate_password_hash(password)
+
+        new_user = User(
+            username=username,
+            email=email,
+            password=hashed_password,
+            role="user"
+        )
         db.session.add(new_user)
         db.session.commit()
         return jsonify({
