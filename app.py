@@ -16,7 +16,7 @@ from flasgger import Swagger
 from extensions import db, jwt, socketio
 
 SWAGGER_TEMPLATE = {
-    "openapi": "3.0.2",
+    "swagger": "2.0",
     "info": {
         "title": "Inteligentna diagnostika API",
         "version": "1.0.0",
