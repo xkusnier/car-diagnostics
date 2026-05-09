@@ -109,7 +109,6 @@ class DtcPattern(db.Model):
     id = db.Column(db.Integer, primary_key=True)
     name = db.Column(db.String(120), nullable=False)
     primary_cause = db.Column(db.String(255), nullable=False)
-    confidence = db.Column(db.Integer, default=80)
     source_url = db.Column(db.Text, nullable=True)
 
 class DtcPatternLink(db.Model):

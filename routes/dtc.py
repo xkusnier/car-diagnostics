@@ -56,7 +56,6 @@ def check_dtc_patterns(vin):
                 "pattern_id": pattern.id,
                 "pattern_name": pattern.name,
                 "primary_cause": pattern.primary_cause,
-                "confidence": pattern.confidence,
                 "required_codes": list(pattern_codes),
                 "vehicle_codes": list(active_dtcs)
             })
