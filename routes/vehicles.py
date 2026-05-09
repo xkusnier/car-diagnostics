@@ -221,9 +221,97 @@ def vehicles_telemetry_comparison():
     security:
       - bearerAuth: []
     description: |
-        Vrati statisticke udaje (priemery) z historickych telemetrickych dat.
-        Zobrazuje vsetky vozidla, ktore boli kedy priradene k pouzivatelovi.
-        Admin vidi vsetky vozidla.
+      Vrati statisticke udaje z historickych telemetrickych dat pre vozidla pouzivatela.
+      Bezný pouzivatel vidi iba svoje vozidla. Admin vidi vsetky vozidla.
+      V odpovedi sa vracia zoznam vozidiel, stav online/offline, priradene zariadenie
+      a vypocitane statistiky ako priemerne otacky, priemerna rychlost, priemerna
+      spotreba, maximalne/minimalne otacky, odometer a pocet vzoriek.
+    responses:
+      200:
+        description: Porovnanie telemetrickych udajov vozidiel
+        schema:
+          type: object
+          properties:
+            status:
+              type: string
+              example: success
+            vehicles:
+              type: array
+              items:
+                type: object
+                properties:
+                  device_id:
+                    type: integer
+                    example: 1
+                  vin:
+                    type: string
+                    example: "1HGCM82633A123456"
+                  brand:
+                    type: string
+                    example: "Honda"
+                  model:
+                    type: string
+                    example: "Accord"
+                  year:
+                    type: string
+                    example: "2021"
+                  engine:
+                    type: string
+                    example: "2.0L"
+                  online:
+                    type: boolean
+                    example: true
+                  user_id:
+                    type: integer
+                    example: 1
+                  owner_user_ids:
+                    type: array
+                    items:
+                      type: integer
+                    example: [1]
+                  statistics:
+                    type: object
+                    properties:
+                      avg_rpm:
+                        type: integer
+                        example: 2200
+                      avg_speed:
+                        type: integer
+                        example: 65
+                      avg_consumption:
+                        type: number
+                        example: 7.2
+                      max_rpm:
+                        type: integer
+                        example: 3000
+                      min_rpm:
+                        type: integer
+                        example: 900
+                      total_odometer:
+                        type: integer
+                        example: 123456
+                      odometer_source:
+                        type: string
+                        example: rpi
+                      samples:
+                        type: integer
+                        example: 25
+            summary:
+              type: object
+              properties:
+                total_vehicles:
+                  type: integer
+                  example: 2
+                online_vehicles:
+                  type: integer
+                  example: 1
+                total_samples:
+                  type: integer
+                  example: 150
+      404:
+        description: Pouzivatel neexistuje
+      500:
+        description: Server error
     """
     try:
         refresh_stale_device_statuses()
