@@ -13,6 +13,8 @@ bp = Blueprint("driving_events", __name__)
 
 # Endpoint prijima udalosti z jazdy priamo zo zariadenia a uklada ich k vozidlu.
 def receive_driving_event():
+    # AI: Tento endpoint bol ciastocne generovany pomocou ChatGPT a nasledne upraveny autorom.
+    # AI: Swagger dokumentacia pre tento endpoint bola vygenerovana pomocou ChatGPT a nasledne upravena autorom.
     """
     Prijem jazdnych udalosti z RPi / gyroskopu / akcelerometra
     ---
@@ -224,6 +226,8 @@ def receive_driving_event():
 
 # Vypis udalosti podla zariadenia, vhodny pre detail konkretneho diagnostickeho modulu.
 def get_device_events(device_id):
+    # AI: Tento endpoint bol ciastocne generovany pomocou ChatGPT a nasledne upraveny autorom.
+    # AI: Swagger dokumentacia pre tento endpoint bola vygenerovana pomocou ChatGPT a nasledne upravena autorom.
     """
     Historia jazdnych udalosti pre konkretne zariadenie
     ---
@@ -289,6 +293,8 @@ def get_device_events(device_id):
 
 # Vypis udalosti podla VIN pouziva overenie, ci ma pouzivatel k vozidlu pristup.
 def get_vehicle_events(vin):
+    # AI: Tento endpoint bol ciastocne generovany pomocou ChatGPT a nasledne upraveny autorom.
+    # AI: Swagger dokumentacia pre tento endpoint bola vygenerovana pomocou ChatGPT a nasledne upravena autorom.
     """
     Historia jazdnych udalosti pre konkretne vozidlo podla VIN
     ---
@@ -373,3 +379,7 @@ def get_vehicle_events(vin):
 bp.add_url_rule('/api/driving-event', endpoint='receive_driving_event', view_func=receive_driving_event, methods=['POST'])
 bp.add_url_rule('/api/device/<int:device_id>/events', endpoint='get_device_events', view_func=jwt_required()(get_device_events), methods=['GET'])
 bp.add_url_rule('/api/vehicle/<vin>/events', endpoint='get_vehicle_events', view_func=jwt_required()(get_vehicle_events), methods=['GET'])
+
+# --- Suhrn vyuzitia AI ---
+# AI: V tomto subore bola pomocou ChatGPT vygenerovana a nasledne autorom upravena Swagger dokumentacia oznacenych endpointov.
+# AI: Oznacene endpointy boli ciastocne generovane pomocou ChatGPT a nasledne upravene autorom.

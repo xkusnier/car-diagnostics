@@ -13,6 +13,7 @@ bp = Blueprint("vehicles", __name__)
 
 # Odstranenie vozidla z uctu maze iba vazbu pouzivatela na vozidlo, nie samotne vozidlo.
 def delete_user_vehicle(vin):
+    # AI: Swagger dokumentacia pre tento endpoint bola vygenerovana pomocou ChatGPT a nasledne upravena autorom.
     """
     Vymazanie vztahu medzi pouzivatelom a vozidlom
     ---
@@ -80,6 +81,7 @@ def delete_user_vehicle(vin):
 
 # Odometer sa cita z live telemetrie, kde moze byt manualny alebo z RPi zdroja.
 def get_vehicle_odometer(vin):
+    # AI: Swagger dokumentacia pre tento endpoint bola vygenerovana pomocou ChatGPT a nasledne upravena autorom.
     """
     Ziskanie odometra vozidla podla VIN
     ---
@@ -141,6 +143,8 @@ def get_vehicle_odometer(vin):
 
 # Manualna uprava odometra meni zdroj hodnoty a pouziva sa hlavne pri chybajucom RPi odometri.
 def update_vehicle_odometer(vin):
+    # AI: Tento endpoint bol ciastocne generovany pomocou ChatGPT a nasledne upraveny autorom.
+    # AI: Swagger dokumentacia pre tento endpoint bola vygenerovana pomocou ChatGPT a nasledne upravena autorom.
     """
     Aktualizacia zdroja a hodnoty odometra vozidla
     ---
@@ -230,6 +234,8 @@ def update_vehicle_odometer(vin):
 
 # Porovnanie vozidiel pocita agregacie nad historickou telemetriou pre kazde dostupne auto.
 def vehicles_telemetry_comparison():
+    # AI: Tento endpoint bol ciastocne generovany pomocou ChatGPT a nasledne upraveny autorom.
+    # AI: Swagger dokumentacia pre tento endpoint bola vygenerovana pomocou ChatGPT a nasledne upravena autorom.
     """
     Porovnanie telemetrie pre vsetky vozidla pouzivatela
     ---
@@ -423,3 +429,7 @@ bp.add_url_rule('/api/user-vehicle/<vin>', endpoint='delete_user_vehicle_alt', v
 bp.add_url_rule('/api/vehicle/<vin>/odometer', endpoint='get_vehicle_odometer', view_func=jwt_required()(get_vehicle_odometer), methods=['GET'])
 bp.add_url_rule('/api/vehicle/<vin>/odometer', endpoint='update_vehicle_odometer', view_func=jwt_required()(update_vehicle_odometer), methods=['PUT'])
 bp.add_url_rule('/api/vehicles/telemetry-comparison', endpoint='vehicles_telemetry_comparison', view_func=jwt_required()(vehicles_telemetry_comparison), methods=['GET'])
+
+# --- Suhrn vyuzitia AI ---
+# AI: V tomto subore bola pomocou ChatGPT vygenerovana a nasledne autorom upravena Swagger dokumentacia oznacenych endpointov.
+# AI: Oznacene endpointy boli ciastocne generovane pomocou ChatGPT a nasledne upravene autorom.

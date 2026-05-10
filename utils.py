@@ -84,6 +84,7 @@ def serialize_driving_event(event: DrivingEvent) -> dict:
     }
 
 # Vypocet kontrolnej cislice VIN podla standardnych vah a modulo 11.
+# AI: Tato funkcia bola ciastocne generovana pomocou ChatGPT a nasledne upravena autorom.
 def compute_vin_check_digit(vin: str) -> str | None:
     vin = (vin or "").strip().upper()
     # Regex odfiltruje zakazane znaky VIN ako I, O alebo Q.
@@ -102,6 +103,7 @@ def compute_vin_check_digit(vin: str) -> str | None:
     return "X" if remainder == 10 else str(remainder)
 
 # Validacia vracia jednotny slovnik, aby endpoint vedel rozlisit format, checksum a platny stav.
+# AI: Tato funkcia bola ciastocne generovana pomocou ChatGPT a nasledne upravena autorom.
 def validate_vin_value(vin: str) -> dict:
     vin = (vin or "").strip().upper()
     if len(vin) != 17:
@@ -143,6 +145,7 @@ def validate_vin_value(vin: str) -> dict:
     }
 
 # Ked CSV nema priamu zavaznost, skusim ju odhadnut podla textu popisu chyby.
+# AI: Tato funkcia bola ciastocne generovana pomocou ChatGPT a nasledne upravena autorom.
 def detect_severity_from_description(description: str) -> str:
     if not description:
         return "medium"
@@ -169,6 +172,7 @@ def get_recommended_action(severity: str) -> str:
     return "Visit a service center soon"
 
 # Odoslanie notifikacie je izolovane, aby endpoint nemal priamo v sebe celu logiku emailu.
+# AI: Tato funkcia bola ciastocne generovana pomocou ChatGPT a nasledne upravena autorom.
 def send_dtc_email_notification(user_email: str, vehicle_info: dict, dtc_code: str, description: str, severity: str):
     """Pošle DTC notifikáciu cez Brevo Transactional Email API.
     Nepoužíva SMTP porty, ale HTTPS request na Brevo API, takže je vhodné aj pre Render Free.
@@ -244,6 +248,7 @@ def _iso(ts: datetime | None) -> str | None:
     return ts.replace(microsecond=0).isoformat() + "Z"
 
 # Z raw payloadu zlozim jednotny tvar, s ktorym dalej pracuje WebSocket aj REST cast.
+# AI: Tato funkcia bola ciastocne generovana pomocou ChatGPT a nasledne upravena autorom.
 def _telemetry_payload(device_id: int, payload: dict) -> dict:
     return {
         "device_id": device_id,
@@ -256,6 +261,7 @@ def _telemetry_payload(device_id: int, payload: dict) -> dict:
     }
 
 # Najdolezitejsia pomocna funkcia: uklada live data, historiu a zaroven pocita jazdu.
+# AI: Tato funkcia bola ciastocne generovana pomocou ChatGPT a nasledne upravena autorom.
 def _save_telemetry_to_db(device_id: int, t: dict) -> None:
     """Uloží telemetriu do DB - live (posledná) + history (všetky) + trip detection"""
     try:
@@ -427,6 +433,7 @@ def _save_telemetry_to_db(device_id: int, t: dict) -> None:
         print(f"❌ Error saving telemetry: {e}")
 
 # GPS poloha sa uklada samostatne, ale ak bezi jazda, priradi sa aj k nej.
+# AI: Tato funkcia bola ciastocne generovana pomocou ChatGPT a nasledne upravena autorom.
 def _save_location_to_db(device_id: int, latitude: float, longitude: float, timestamp: datetime | None = None) -> int | None:
     try:
         # Pri GPS polohe sa opat pouzije posledne vozidlo priradene k device_id.
@@ -501,3 +508,6 @@ __all__ = [
     "_get_vehicle_id_from_device",
     "_get_latest_telemetry",
 ]
+
+# --- Suhrn vyuzitia AI ---
+# AI: V tomto subore boli pomocou ChatGPT ciastocne generovane a nasledne autorom upravene oznacene pomocne funkcie pre validaciu VIN, odhad zavaznosti, emailove notifikacie, spracovanie telemetrie a ukladanie polohy.

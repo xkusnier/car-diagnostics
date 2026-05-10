@@ -9,6 +9,7 @@ def ws_connect():
     emit("server_ready", {"status": "ok"})
 
 # Klient sa prihlasi do miestnosti podla device_id, aby dostaval iba data pre dane zariadenie.
+# AI: Tato WebSocket funkcia bola ciastocne generovana pomocou ChatGPT a nasledne upravena autorom.
 def ws_subscribe_device(data):
     """
     FE: socket.emit("subscribe_device", {device_id: 1})
@@ -24,6 +25,7 @@ def ws_subscribe_device(data):
     emit("subscribed", {"device_id": device_id})
 
 # Telemetria prijata cez WebSocket sa najprv ulozi a potom sa rozosle ostatnym klientom.
+# AI: Tato WebSocket funkcia bola ciastocne generovana pomocou ChatGPT a nasledne upravena autorom.
 def ws_telemetry(data):
     """
     RPi (alebo test client) posiela realtime telemetry cez WS.
@@ -52,3 +54,6 @@ def ws_telemetry(data):
     # Aktualizacia sa posiela iba klientom prihlasenym na konkretne zariadenie.
     socketio.emit("telemetry_update", t, room=f"device:{device_id}")
     emit("telemetry_ack", {"ok": True, "timestamp": t["timestamp"]})
+
+# --- Suhrn vyuzitia AI ---
+# AI: V tomto subore boli pomocou ChatGPT ciastocne generovane a nasledne autorom upravene oznacene WebSocket funkcie pre prihlasenie klienta k zariadeniu a spracovanie realtime telemetrie.

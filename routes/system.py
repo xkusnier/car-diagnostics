@@ -13,6 +13,7 @@ bp = Blueprint("system", __name__)
 
 # Jednoduchy health endpoint pre Render alebo rychle overenie, ze backend bezi.
 def health_check():
+    # AI: Swagger dokumentacia pre tento endpoint bola vygenerovana pomocou ChatGPT a nasledne upravena autorom.
     """
     Health check endpoint
     ---
@@ -34,6 +35,8 @@ def health_check():
 
 # Inicializacia DB je ponechana ako pomocny endpoint pre nasadenie a testovanie.
 def init_db():
+    # AI: Tento endpoint bol ciastocne generovany pomocou ChatGPT a nasledne upraveny autorom.
+    # AI: Swagger dokumentacia pre tento endpoint bola vygenerovana pomocou ChatGPT a nasledne upravena autorom.
     """
     Inicializacia databazy
     ---
@@ -62,6 +65,7 @@ def init_db():
 
 # Domovska odpoved sluzi hlavne ako rozcestnik a kontrola dostupnych endpointov.
 def home():
+    # AI: Swagger dokumentacia pre tento endpoint bola vygenerovana pomocou ChatGPT a nasledne upravena autorom.
     """
     Health check endpoint
     ---
@@ -98,6 +102,8 @@ def home():
 
 # Debug vypis dat z databazy pomaha pri kontrole stavu pocas vyvoja.
 def show_all():
+    # AI: Tento endpoint bol ciastocne generovany pomocou ChatGPT a nasledne upraveny autorom.
+    # AI: Swagger dokumentacia pre tento endpoint bola vygenerovana pomocou ChatGPT a nasledne upravena autorom.
     """
     Vypis vsetkych vozidiel a DTC kodov
     ---
@@ -132,3 +138,7 @@ bp.add_url_rule('/api/init-db', endpoint='api_init_db', view_func=init_db, metho
 bp.add_url_rule('/show-all', endpoint='show_all', view_func=show_all, methods=['GET'])
 bp.add_url_rule('/api/show-all', endpoint='api_show_all', view_func=show_all, methods=['GET'])
 bp.add_url_rule('/api/all', endpoint='api_all', view_func=show_all, methods=['GET'])
+
+# --- Suhrn vyuzitia AI ---
+# AI: V tomto subore bola pomocou ChatGPT vygenerovana a nasledne autorom upravena Swagger dokumentacia oznacenych endpointov.
+# AI: Oznacene endpointy boli ciastocne generovane pomocou ChatGPT a nasledne upravene autorom.

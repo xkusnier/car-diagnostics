@@ -13,6 +13,8 @@ bp = Blueprint("communication", __name__)
 
 # Prvy krok spojenia zo zariadenia - backend vytvori alebo obnovi device zaznam.
 def device_connect_syn():
+    # AI: Tento endpoint bol ciastocne generovany pomocou ChatGPT a nasledne upraveny autorom.
+    # AI: Swagger dokumentacia pre tento endpoint bola vygenerovana pomocou ChatGPT a nasledne upravena autorom.
     """
     3-way handshake - SYN
     ---
@@ -85,6 +87,7 @@ def device_connect_syn():
 
 # Druhy krok spojenia potvrdi zariadenie a podla VIN ho priradi k vozidlu.
 def device_connect_ack():
+    # AI: Swagger dokumentacia pre tento endpoint bola vygenerovana pomocou ChatGPT a nasledne upravena autorom.
     """
     3-way handshake - ACK
     ---
@@ -157,6 +160,8 @@ def device_connect_ack():
 
 # Heartbeat iba udrzi zariadenie online a vrati mu cakajuce prikazy.
 def heartbeat():
+    # AI: Tento endpoint bol ciastocne generovany pomocou ChatGPT a nasledne upraveny autorom.
+    # AI: Swagger dokumentacia pre tento endpoint bola vygenerovana pomocou ChatGPT a nasledne upravena autorom.
     """
     Heartbeat od RPi (keep-alive + command polling)
     ---
@@ -239,6 +244,7 @@ def heartbeat():
 
 # Frontend cez tento endpoint vlozi prikaz, ktory si neskor precita zariadenie.
 def trigger_command():
+    # AI: Swagger dokumentacia pre tento endpoint bola vygenerovana pomocou ChatGPT a nasledne upravena autorom.
     """
     Manualne spustenie prikazu na zariadeni
     ---
@@ -327,6 +333,8 @@ def trigger_command():
 
 # Hlavny vstup pre CAN/OBD data zo zariadenia, vratane DTC a telemetrie.
 def receive_can_packet():
+    # AI: Tento endpoint bol ciastocne generovany pomocou ChatGPT a nasledne upraveny autorom.
+    # AI: Swagger dokumentacia pre tento endpoint bola vygenerovana pomocou ChatGPT a nasledne upravena autorom.
     """
     Prijem CAN packetov z RPi (VIN, DTC, clear_status, telemetria)
     ---
@@ -630,6 +638,8 @@ def receive_can_packet():
 
 # GPS poloha sa prijima oddelene od CAN dat, aby fungovala aj pri inom tempe odosielania.
 def receive_location():
+    # AI: Tento endpoint bol ciastocne generovany pomocou ChatGPT a nasledne upraveny autorom.
+    # AI: Swagger dokumentacia pre tento endpoint bola vygenerovana pomocou ChatGPT a nasledne upravena autorom.
     """
     Prijem GPS polohy z RPi
     ---
@@ -754,3 +764,7 @@ bp.add_url_rule('/api/heartbeat', endpoint='heartbeat', view_func=heartbeat, met
 bp.add_url_rule('/api/trigger', endpoint='trigger_command', view_func=trigger_command, methods=['POST'])
 bp.add_url_rule('/api/can', endpoint='receive_can_packet', view_func=receive_can_packet, methods=['POST'])
 bp.add_url_rule('/api/location', endpoint='receive_location', view_func=receive_location, methods=['POST'])
+
+# --- Suhrn vyuzitia AI ---
+# AI: V tomto subore bola pomocou ChatGPT vygenerovana a nasledne autorom upravena Swagger dokumentacia oznacenych endpointov.
+# AI: Oznacene endpointy boli ciastocne generovane pomocou ChatGPT a nasledne upravene autorom.

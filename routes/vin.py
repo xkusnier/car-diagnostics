@@ -13,6 +13,8 @@ bp = Blueprint("vin", __name__)
 
 # Endpoint najprv overi samotny VIN a az potom kontroluje, ci je vozidlo v databaze.
 def validate_vin_endpoint():
+    # AI: Tento endpoint bol ciastocne generovany pomocou ChatGPT a nasledne upraveny autorom.
+    # AI: Swagger dokumentacia pre tento endpoint bola vygenerovana pomocou ChatGPT a nasledne upravena autorom.
     """
     Validacia VIN formatu a checksumu
     ---
@@ -98,3 +100,7 @@ def validate_vin_endpoint():
 # URL rules
 bp.add_url_rule('/api/validate-vin', endpoint='validate_vin_endpoint', view_func=jwt_required(optional=True)(validate_vin_endpoint), methods=['POST'])
 bp.add_url_rule('/api/vin/validate', endpoint='validate_vin_endpoint_alt', view_func=jwt_required(optional=True)(validate_vin_endpoint), methods=['POST'])
+
+# --- Suhrn vyuzitia AI ---
+# AI: V tomto subore bola pomocou ChatGPT vygenerovana a nasledne autorom upravena Swagger dokumentacia oznacenych endpointov.
+# AI: Oznacene endpointy boli ciastocne generovane pomocou ChatGPT a nasledne upravene autorom.

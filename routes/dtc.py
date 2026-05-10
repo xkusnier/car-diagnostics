@@ -13,6 +13,8 @@ bp = Blueprint("dtc", __name__)
 
 # Kontrola vzorov hlada kombinacie aktivnych DTC, ktore mozu znamenat spolocny problem.
 def check_dtc_patterns(vin):
+    # AI: Tento endpoint bol ciastocne generovany pomocou ChatGPT a nasledne upraveny autorom.
+    # AI: Swagger dokumentacia pre tento endpoint bola vygenerovana pomocou ChatGPT a nasledne upravena autorom.
     """
     Kontrola kombinacii DTC kodov podla vzorov
     ---
@@ -74,6 +76,7 @@ def check_dtc_patterns(vin):
 
 # Vymazanie DTC sa uklada ako prikaz pre zariadenie, nie ako okamzita zmena v aute.
 def clear_device_dtcs(device_id):
+    # AI: Swagger dokumentacia pre tento endpoint bola vygenerovana pomocou ChatGPT a nasledne upravena autorom.
     """
     Odoslanie prikazu na vymazanie DTC kodov
     ---
@@ -147,6 +150,8 @@ def clear_device_dtcs(device_id):
 
 # Nacitanie DTC vytvori prikaz, ktory si RPi vyzdvihne cez heartbeat.
 def read_device_dtcs(device_id):
+    # AI: Tento endpoint bol ciastocne generovany pomocou ChatGPT a nasledne upraveny autorom.
+    # AI: Swagger dokumentacia pre tento endpoint bola vygenerovana pomocou ChatGPT a nasledne upravena autorom.
     """
     Odoslanie prikazu na nacitanie DTC kodov
     ---
@@ -225,6 +230,8 @@ def read_device_dtcs(device_id):
 
 # Plna historia DTC je pouzita pre admin/prehladove obrazovky a podporuje aj filtre.
 def dtc_history_full():
+    # AI: Tento endpoint bol ciastocne generovany pomocou ChatGPT a nasledne upraveny autorom.
+    # AI: Swagger dokumentacia pre tento endpoint bola vygenerovana pomocou ChatGPT a nasledne upravena autorom.
     """
     Kompletna historia DTC kodov podla VIN
     ---
@@ -289,6 +296,8 @@ def dtc_history_full():
 
 # Import CSV doplna lokalny katalog popisov DTC kodov.
 def load_dtc_codes_from_csv():
+    # AI: Tento endpoint bol ciastocne generovany pomocou ChatGPT a nasledne upraveny autorom.
+    # AI: Swagger dokumentacia pre tento endpoint bola vygenerovana pomocou ChatGPT a nasledne upravena autorom.
     """
     Nacitanie DTC kodov z CSV suboru
     ---
@@ -348,6 +357,7 @@ def load_dtc_codes_from_csv():
 
 # Popis DTC sa hlada v lokalnej tabulke a pri potrebe sa doplni odhad zavaznosti.
 def get_dtc_description():
+    # AI: Swagger dokumentacia pre tento endpoint bola vygenerovana pomocou ChatGPT a nasledne upravena autorom.
     """
     Ziskanie popisu DTC kodu
     ---
@@ -400,6 +410,7 @@ def get_dtc_description():
 
 # Historia pre jedno vozidlo je chranena kontrolou vlastnictva alebo admin roly.
 def get_dtc_history(vin):
+    # AI: Swagger dokumentacia pre tento endpoint bola vygenerovana pomocou ChatGPT a nasledne upravena autorom.
     """
     Jednoducha historia DTC kodov podla VIN
     ---
@@ -439,3 +450,7 @@ bp.add_url_rule('/api/load-dtc-codes', endpoint='load_dtc_codes_from_csv', view_
 bp.add_url_rule('/api/dtc-description', endpoint='get_dtc_description', view_func=get_dtc_description, methods=['GET', 'POST'])
 bp.add_url_rule('/api/vehicle/<vin>/dtc-history', endpoint='get_dtc_history', view_func=jwt_required()(get_dtc_history), methods=['GET'])
 bp.add_url_rule('/api/dtc-history/<vin>', endpoint='get_dtc_history_alt', view_func=jwt_required()(get_dtc_history), methods=['GET'])
+
+# --- Suhrn vyuzitia AI ---
+# AI: V tomto subore bola pomocou ChatGPT vygenerovana a nasledne autorom upravena Swagger dokumentacia oznacenych endpointov.
+# AI: Oznacene endpointy boli ciastocne generovane pomocou ChatGPT a nasledne upravene autorom.

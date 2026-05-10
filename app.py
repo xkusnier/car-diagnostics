@@ -15,6 +15,7 @@ from flask_cors import CORS
 from flasgger import Swagger
 from extensions import db, jwt, socketio
 
+# AI: Swagger template aplikacie bol vygenerovany pomocou ChatGPT a nasledne upraveny autorom.
 # Swagger nastavenie je drzana ako samostatna konstanta, aby sa nemiesala s inicializaciou Flasku.
 SWAGGER_TEMPLATE = {
     "swagger": "2.0",
@@ -52,6 +53,7 @@ Swagger UI je dostupne na `/apidocs`.
     }
 }
 
+# AI: Swagger konfiguracia aplikacie bola vygenerovana pomocou ChatGPT a nasledne upravena autorom.
 # Konfiguracia urcuje najma cestu k JSON specifikacii a zapnutie Swagger UI.
 SWAGGER_CONFIG = {
     "headers": [],
@@ -196,3 +198,6 @@ if __name__ == "__main__":
         db.create_all()
     # Lokalny start pouziva SocketIO runner, aby fungovali aj websocket endpointy.
     socketio.run(app, host="0.0.0.0", port=int(os.environ.get("PORT", 5000)))
+
+# --- Suhrn vyuzitia AI ---
+# AI: V tomto subore bol pomocou ChatGPT vygenerovany a nasledne autorom upraveny Swagger template a Swagger konfiguracia aplikacie.

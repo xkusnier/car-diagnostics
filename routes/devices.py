@@ -13,6 +13,7 @@ bp = Blueprint("devices", __name__)
 
 # Mazanie zariadenia je obmedzene na vlastnika alebo administratora.
 def delete_device(device_id):
+    # AI: Swagger dokumentacia pre tento endpoint bola vygenerovana pomocou ChatGPT a nasledne upravena autorom.
     """
     Odstranenie zariadenia
     ---
@@ -83,6 +84,8 @@ def delete_device(device_id):
 
 # Manualne pridanie zariadenia z frontendu, ked este nebolo vytvorene cez RPi komunikaciu.
 def add_device():
+    # AI: Tento endpoint bol ciastocne generovany pomocou ChatGPT a nasledne upraveny autorom.
+    # AI: Swagger dokumentacia pre tento endpoint bola vygenerovana pomocou ChatGPT a nasledne upravena autorom.
     """
     Pridanie noveho zariadenia
     ---
@@ -198,6 +201,8 @@ def add_device():
 
 # Detail diagnostiky zariadenia spaja online stav, vozidlo, aktivne DTC a telemetriu.
 def device_diagnostics(device_id):
+    # AI: Tento endpoint bol ciastocne generovany pomocou ChatGPT a nasledne upraveny autorom.
+    # AI: Swagger dokumentacia pre tento endpoint bola vygenerovana pomocou ChatGPT a nasledne upravena autorom.
     """
     Ziskanie diagnostickych udajov pre zariadenie
     ---
@@ -334,6 +339,8 @@ def device_diagnostics(device_id):
 
 # Zoznam zariadeni sa filtruje podla roly, admin vidi viac ako bezny pouzivatel.
 def my_devices():
+    # AI: Tento endpoint bol ciastocne generovany pomocou ChatGPT a nasledne upraveny autorom.
+    # AI: Swagger dokumentacia pre tento endpoint bola vygenerovana pomocou ChatGPT a nasledne upravena autorom.
     """
     Zoznam zariadeni prihlaseneho pouzivatela
     ---
@@ -422,6 +429,7 @@ def my_devices():
 
 # Zariadenie moze explicitne oznamit odpojenie, aby sa stav nemusel menit az po timeout-e.
 def device_offline(device_id):
+    # AI: Swagger dokumentacia pre tento endpoint bola vygenerovana pomocou ChatGPT a nasledne upravena autorom.
     """
     Nastavenie zariadenia ako offline
     ---
@@ -460,3 +468,7 @@ bp.add_url_rule('/api/device/<int:device_id>/diagnostics', endpoint='device_diag
 bp.add_url_rule('/api/my-devices', endpoint='my_devices', view_func=jwt_required()(my_devices), methods=['GET'])
 bp.add_url_rule('/api/device/<int:device_id>/offline', endpoint='device_offline', view_func=device_offline, methods=['POST'])
 bp.add_url_rule('/api/device_offline/<int:device_id>', endpoint='device_offline_alt', view_func=device_offline, methods=['POST'])
+
+# --- Suhrn vyuzitia AI ---
+# AI: V tomto subore bola pomocou ChatGPT vygenerovana a nasledne autorom upravena Swagger dokumentacia oznacenych endpointov.
+# AI: Oznacene endpointy boli ciastocne generovane pomocou ChatGPT a nasledne upravene autorom.

@@ -13,6 +13,8 @@ bp = Blueprint("trips", __name__)
 
 # Jazdy sa nacitavaju podla VIN a vratia sa iba pouzivatelovi s pristupom k vozidlu.
 def get_vehicle_trips(vin):
+    # AI: Tento endpoint bol ciastocne generovany pomocou ChatGPT a nasledne upraveny autorom.
+    # AI: Swagger dokumentacia pre tento endpoint bola vygenerovana pomocou ChatGPT a nasledne upravena autorom.
     """
     Ziskanie vsetkych jazd pre konkretne vozidlo
     ---
@@ -116,3 +118,7 @@ def get_vehicle_trips(vin):
 
 # URL rules
 bp.add_url_rule('/api/vehicle/<vin>/trips', endpoint='get_vehicle_trips', view_func=jwt_required()(get_vehicle_trips), methods=['GET'])
+
+# --- Suhrn vyuzitia AI ---
+# AI: V tomto subore bola pomocou ChatGPT vygenerovana a nasledne autorom upravena Swagger dokumentacia oznacenych endpointov.
+# AI: Oznacene endpointy boli ciastocne generovane pomocou ChatGPT a nasledne upravene autorom.

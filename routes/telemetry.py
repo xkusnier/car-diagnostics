@@ -13,6 +13,7 @@ bp = Blueprint("telemetry", __name__)
 
 # Jednotlive endpointy telemetrie vracaju mensie casti live stavu pre frontend karty.
 def get_device_odometer(device_id):
+    # AI: Swagger dokumentacia pre tento endpoint bola vygenerovana pomocou ChatGPT a nasledne upravena autorom.
     """
     Ziskanie posledneho znameho stavu odometra zariadenia
     ---
@@ -52,6 +53,7 @@ def get_device_odometer(device_id):
 
 # Bateria sa cita z poslednej live telemetrie priradeneho vozidla.
 def get_device_battery(device_id):
+    # AI: Swagger dokumentacia pre tento endpoint bola vygenerovana pomocou ChatGPT a nasledne upravena autorom.
     """
     Ziskanie poslednych bateriovych dat zariadenia
     ---
@@ -91,6 +93,7 @@ def get_device_battery(device_id):
 
 # Motorove udaje su oddelene, aby frontend nemusel nacitavat cely live payload.
 def get_device_engine(device_id):
+    # AI: Swagger dokumentacia pre tento endpoint bola vygenerovana pomocou ChatGPT a nasledne upravena autorom.
     """
     Ziskanie poslednych motorovych dat zariadenia
     ---
@@ -135,6 +138,7 @@ def get_device_engine(device_id):
 
 # Spotreba a palivove udaje sa vracaju samostatne pre prehladne zobrazenie.
 def get_device_fuel(device_id):
+    # AI: Swagger dokumentacia pre tento endpoint bola vygenerovana pomocou ChatGPT a nasledne upravena autorom.
     """
     Ziskanie poslednych palivovych dat zariadenia
     ---
@@ -177,6 +181,7 @@ def get_device_fuel(device_id):
 
 # Rychlost sa cita z live riadku, teda z poslednej prijatej vzorky.
 def get_device_speed(device_id):
+    # AI: Swagger dokumentacia pre tento endpoint bola vygenerovana pomocou ChatGPT a nasledne upravena autorom.
     """
     Ziskanie poslednej rychlosti zariadenia
     ---
@@ -214,6 +219,8 @@ def get_device_speed(device_id):
 
 # Poloha berie posledny ulozeny GPS zaznam pre vozidlo priradene k zariadeniu.
 def get_device_location(device_id):
+    # AI: Tento endpoint bol ciastocne generovany pomocou ChatGPT a nasledne upraveny autorom.
+    # AI: Swagger dokumentacia pre tento endpoint bola vygenerovana pomocou ChatGPT a nasledne upravena autorom.
     """
     Ziskanie poslednej GPS polohy zariadenia
     ---
@@ -270,6 +277,8 @@ def get_device_location(device_id):
 
 # Kompletny live endpoint sklada jeden vacsi JSON pre detail zariadenia alebo dashboard.
 def get_device_live(device_id):
+    # AI: Tento endpoint bol ciastocne generovany pomocou ChatGPT a nasledne upraveny autorom.
+    # AI: Swagger dokumentacia pre tento endpoint bola vygenerovana pomocou ChatGPT a nasledne upravena autorom.
     """
     Ziskanie kompletnych live dat zariadenia
     ---
@@ -343,3 +352,7 @@ bp.add_url_rule('/api/device/<int:device_id>/fuel', endpoint='get_device_fuel', 
 bp.add_url_rule('/api/device/<int:device_id>/speed', endpoint='get_device_speed', view_func=jwt_required()(get_device_speed), methods=['GET'])
 bp.add_url_rule('/api/device/<int:device_id>/location', endpoint='get_device_location', view_func=jwt_required()(get_device_location), methods=['GET'])
 bp.add_url_rule('/api/device/<int:device_id>/live', endpoint='get_device_live', view_func=jwt_required()(get_device_live), methods=['GET'])
+
+# --- Suhrn vyuzitia AI ---
+# AI: V tomto subore bola pomocou ChatGPT vygenerovana a nasledne autorom upravena Swagger dokumentacia oznacenych endpointov.
+# AI: Oznacene endpointy boli ciastocne generovane pomocou ChatGPT a nasledne upravene autorom.

@@ -13,6 +13,8 @@ bp = Blueprint("dashboard", __name__)
 
 # Dashboard z viacerych tabuliek sklada rychly prehlad pre prihlaseneho pouzivatela.
 def dashboard_summary():
+    # AI: Tento endpoint bol ciastocne generovany pomocou ChatGPT a nasledne upraveny autorom.
+    # AI: Swagger dokumentacia pre tento endpoint bola vygenerovana pomocou ChatGPT a nasledne upravena autorom.
     """
     Domovska stranka - suhrn pouzivatelskych dat a vozidla s aktivnymi chybami
     ---
@@ -117,3 +119,7 @@ def dashboard_summary():
 # URL rules
 bp.add_url_rule('/api/dashboard-summary', endpoint='dashboard_summary', view_func=jwt_required()(dashboard_summary), methods=['GET'])
 bp.add_url_rule('/api/dashboard/summary', endpoint='dashboard_summary_alt', view_func=jwt_required()(dashboard_summary), methods=['GET'])
+
+# --- Suhrn vyuzitia AI ---
+# AI: V tomto subore bola pomocou ChatGPT vygenerovana a nasledne autorom upravena Swagger dokumentacia oznacenych endpointov.
+# AI: Oznacene endpointy boli ciastocne generovane pomocou ChatGPT a nasledne upravene autorom.

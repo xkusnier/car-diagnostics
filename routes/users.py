@@ -14,6 +14,8 @@ bp = Blueprint("users", __name__)
 
 # Login overi heslo a do JWT ulozi identitu pouzivatela ako string.
 def login():
+    # AI: Tento endpoint bol ciastocne generovany pomocou ChatGPT a nasledne upraveny autorom.
+    # AI: Swagger dokumentacia pre tento endpoint bola vygenerovana pomocou ChatGPT a nasledne upravena autorom.
     """
     Prihlasenie pouzivatela
     ---
@@ -101,6 +103,8 @@ def login():
 
 # Registracia vytvori noveho pouzivatela s hashovanym heslom a zakladnou rolou.
 def register():
+    # AI: Tento endpoint bol ciastocne generovany pomocou ChatGPT a nasledne upraveny autorom.
+    # AI: Swagger dokumentacia pre tento endpoint bola vygenerovana pomocou ChatGPT a nasledne upravena autorom.
     """
     Registracia noveho pouzivatela
     ---
@@ -174,3 +178,7 @@ def register():
 # URL rules
 bp.add_url_rule('/api/login', endpoint='login', view_func=login, methods=['POST'])
 bp.add_url_rule('/api/register', endpoint='register', view_func=register, methods=['POST'])
+
+# --- Suhrn vyuzitia AI ---
+# AI: V tomto subore bola pomocou ChatGPT vygenerovana a nasledne autorom upravena Swagger dokumentacia oznacenych endpointov.
+# AI: Oznacene endpointy boli ciastocne generovane pomocou ChatGPT a nasledne upravene autorom.
