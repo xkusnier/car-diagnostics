@@ -11,6 +11,7 @@ from utils import *
 
 bp = Blueprint("vehicles", __name__)
 
+# Odstranenie vozidla z uctu maze iba vazbu pouzivatela na vozidlo, nie samotne vozidlo.
 def delete_user_vehicle(vin):
     """
     Vymazanie vztahu medzi pouzivatelom a vozidlom
@@ -45,13 +46,17 @@ def delete_user_vehicle(vin):
         description: Server error
     """
     try:
+        # Vztah k vozidlu sa maze v kontexte aktualne prihlaseneho pouzivatela.
         user_id = int(get_jwt_identity())
         user = User.query.get(user_id)
         if not user:
             return jsonify({"error": "User not found"}), 404
+        # VIN z URL sa normalizuje na velke pismena pred hladanim.
         vehicle = Vehicle.query.filter_by(vin=vin.upper()).first()
         if not vehicle:
             return jsonify({"error": "Vehicle not found"}), 404
+        # Admin moze odstranit vazbu na vozidlo vseobecne, bez kontroly konkretneho vlastnika.
+        # Admin moze odstranit lubovolnu vazbu na vozidlo, bez ohladu na vlastnika.
         if user.role == "admin":
             user_vehicle = UserVehicle.query.filter_by(vehicle_id=vehicle.id).first()
         else:
@@ -61,6 +66,7 @@ def delete_user_vehicle(vin):
             ).first()
         if not user_vehicle:
             return jsonify({"error": "Vehicle not associated with this user"}), 404
+        # Maze sa iba zaznam v UserVehicle, nie samotne auto ani jeho historia.
         db.session.delete(user_vehicle)
         db.session.commit()
         return jsonify({
@@ -72,6 +78,7 @@ def delete_user_vehicle(vin):
         print("❌ DELETE USER VEHICLE ERROR:", e)
         return jsonify({"error": str(e)}), 500
 
+# Odometer sa cita z live telemetrie, kde moze byt manualny alebo z RPi zdroja.
 def get_vehicle_odometer(vin):
     """
     Ziskanie odometra vozidla podla VIN
@@ -104,11 +111,15 @@ def get_vehicle_odometer(vin):
         vehicle = Vehicle.query.filter_by(vin=vin.upper()).first()
         if not vehicle:
             return jsonify({"error": "Vehicle not found"}), 404
+        # Pri citani detailov vozidla sa kontroluje, ci bezny pouzivatel auto vlastni.
         if user.role != "admin":
             user_vehicle = UserVehicle.query.filter_by(user_id=user_id, vehicle_id=vehicle.id).first()
             if not user_vehicle:
                 return jsonify({"error": "Vehicle not owned by user"}), 403
+        # Odometer je ulozeny v live telemetrii, lebo ide o aktualny stav vozidla.
+        # Odometer sa cita z live telemetrie, lebo tam je posledna znama hodnota.
         live_row = VehicleTelemetryLive.query.filter_by(vehicle_id=vehicle.id).first()
+        # Ak vozidlo este nema live telemetry riadok, vytvori sa minimalny zaznam.
         if not live_row:
             return jsonify({
                 "status": "success",
@@ -128,6 +139,7 @@ def get_vehicle_odometer(vin):
         print("❌ GET VEHICLE ODOMETER ERROR:", e)
         return jsonify({"error": str(e)}), 500
 
+# Manualna uprava odometra meni zdroj hodnoty a pouziva sa hlavne pri chybajucom RPi odometri.
 def update_vehicle_odometer(vin):
     """
     Aktualizacia zdroja a hodnoty odometra vozidla
@@ -181,9 +193,12 @@ def update_vehicle_odometer(vin):
             user_vehicle = UserVehicle.query.filter_by(user_id=user_id, vehicle_id=vehicle.id).first()
             if not user_vehicle:
                 return jsonify({"error": "Vehicle not owned by user"}), 403
+        # Aktualizacia odometra prijima zdroj a hodnotu z tela requestu.
         payload = request.get_json()
         odometer_source = (payload.get("odometer_source") or "").strip().lower()
         odometer_value = payload.get("odometer")
+        # Zdroj odometra obmedzujem na dve podporovane moznosti, aby sa s nim dalo dalej pocitat.
+        # Zdroj odometra je obmedzeny na hodnoty, ktore pozna aj frontend.
         if odometer_source not in {"manual", "rpi"}:
             return jsonify({"error": "odometer_source must be 'manual' or 'rpi'"}), 400
         live_row = VehicleTelemetryLive.query.filter_by(vehicle_id=vehicle.id).first()
@@ -192,6 +207,7 @@ def update_vehicle_odometer(vin):
             db.session.add(live_row)
             db.session.flush()
         live_row.odometer_source = odometer_source
+        # Pri manualnom zdroji musi prist aj ciselna hodnota odometra.
         if odometer_source == "manual":
             if odometer_value is None:
                 return jsonify({"error": "Missing odometer for manual source"}), 400
@@ -212,6 +228,7 @@ def update_vehicle_odometer(vin):
         print("❌ UPDATE VEHICLE ODOMETER ERROR:", e)
         return jsonify({"error": str(e)}), 500
 
+# Porovnanie vozidiel pocita agregacie nad historickou telemetriou pre kazde dostupne auto.
 def vehicles_telemetry_comparison():
     """
     Porovnanie telemetrie pre vsetky vozidla pouzivatela
@@ -314,6 +331,7 @@ def vehicles_telemetry_comparison():
         description: Server error
     """
     try:
+        # Porovnanie vozidiel najprv aktualizuje online/offline stav zariadeni.
         refresh_stale_device_statuses()
         user_id = int(get_jwt_identity())
         user = User.query.get(user_id)
@@ -321,6 +339,8 @@ def vehicles_telemetry_comparison():
             return jsonify({"error": "User not found"}), 404
         vehicles_data = []
         online_count = 0
+        # Admin vidi v porovnani vsetky vozidla, bezny pouzivatel iba svoje priradene auta.
+        # Admin porovnava vsetky vozidla a zariadenia v systeme.
         if user.role == "admin":
             vehicles = Vehicle.query.all()
             devices = Device.query.all()
@@ -329,6 +349,7 @@ def vehicles_telemetry_comparison():
             vehicles = [uv.vehicle for uv in user_vehicles]
             devices = Device.query.filter_by(user_id=user_id).all()
         vehicle_device_map = {}
+        # Pri viacerych zariadeniach sa preferuje online zariadenie.
         for d in devices:
             if d.link and len(d.link) > 0 and d.link[0].last_vin_id:
                 vehicle_id = d.link[0].last_vin_id
@@ -338,7 +359,9 @@ def vehicles_telemetry_comparison():
                 else:
                     if not existing.status and d.status:
                         vehicle_device_map[vehicle_id] = d
+        # Pre kazde vozidlo sa sklada suhrn vlastnikov, zariadenia a live telemetrie.
         for vehicle in vehicles:
+            # Vlastnici sa citaju osobitne, aby sa adminovi zobrazili aj mena pouzivatelov.
             owner_links = UserVehicle.query.filter_by(vehicle_id=vehicle.id).all()
             owner_user_ids = [link.user_id for link in owner_links]
             primary_user_id = owner_user_ids[0] if owner_user_ids else None
@@ -357,6 +380,7 @@ def vehicles_telemetry_comparison():
             ).filter(
                 VehicleTelemetryHistory.vehicle_id == vehicle.id
             ).first()
+            # Live riadok sa pripaja iba ak uz auto poslalo aspon jednu telemetricku vzorku.
             live = VehicleTelemetryLive.query.filter_by(vehicle_id=vehicle.id).first()
             vehicles_data.append({
                 "device_id": device_id,

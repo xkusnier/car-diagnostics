@@ -12,6 +12,7 @@ from werkzeug.security import generate_password_hash, check_password_hash
 
 bp = Blueprint("users", __name__)
 
+# Login overi heslo a do JWT ulozi identitu pouzivatela ako string.
 def login():
     """
     Prihlasenie pouzivatela
@@ -68,12 +69,16 @@ def login():
         description: Server error
     """
     try:
+        # Login caka JSON s identifikatorom a heslom.
         data = request.get_json()
+        # Identifikator moze byt username alebo email, preto sa dalej hlada cez OR podmienku.
         identifier = data.get("identifier")
         password = data.get("password")
         if not identifier or not password:
             return jsonify({"error": "Missing identifier or password"}), 400
+        # Orezanie medzier brani chybam pri kopirovani prihlasovacich udajov.
         identifier = identifier.strip()
+        # Vyhladavanie je case-insensitive pre email aj username.
         user = User.query.filter(
             or_(
                 func.lower(User.email) == identifier.lower(),
@@ -82,6 +87,7 @@ def login():
         ).first()
         if not user or not check_password_hash(user.password, password):
             return jsonify({"error": "Invalid credentials"}), 401
+        # Do JWT identity sa uklada user id, ktore potom pouzivaju chranene endpointy.
         access_token = create_access_token(identity=str(user.id))
         return jsonify({
             "status": "success",
@@ -93,6 +99,7 @@ def login():
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
+# Registracia vytvori noveho pouzivatela s hashovanym heslom a zakladnou rolou.
 def register():
     """
     Registracia noveho pouzivatela
@@ -130,6 +137,7 @@ def register():
         description: Server error
     """
     try:
+        # Registracia vytvara novy pouzivatelsky ucet z JSON tela requestu.
         data = request.get_json()
         username = data.get("username")
         email = data.get("email")
@@ -139,8 +147,10 @@ def register():
         username = username.strip()
         if len(username) < 3:
             return jsonify({"error": "Username must be at least 3 characters long"}), 400
+        # Email je tiez jedinecny, lebo sluzi aj na notifikacie a prihlasenie.
         if User.query.filter_by(email=email).first():
             return jsonify({"error": "Email already exists"}), 409
+        # Username musi byt jedinecny, aby sa nim dalo neskor prihlasit.
         if User.query.filter_by(username=username).first():
             return jsonify({"error": "Username already exists"}), 409
         hashed_password = generate_password_hash(password)

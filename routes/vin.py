@@ -11,6 +11,7 @@ from utils import *
 
 bp = Blueprint("vin", __name__)
 
+# Endpoint najprv overi samotny VIN a az potom kontroluje, ci je vozidlo v databaze.
 def validate_vin_endpoint():
     """
     Validacia VIN formatu a checksumu
@@ -56,18 +57,24 @@ def validate_vin_endpoint():
         description: Server error
     """
     try:
+        # VIN sa cita z JSON tela, aby sa endpoint dal jednoducho volat z frontendu.
         payload = request.get_json()
+        # VIN sa hned normalizuje, lebo male pismena by inak robili rozdiel pri hladani.
         vin = (payload.get("vin") or "").strip().upper()
         if not vin:
             return jsonify({"error": "Missing 'vin' parameter"}), 400
+        # Najprv sa kontroluje matematicka/formatova platnost VIN, az potom existencia v systeme.
         validation = validate_vin_value(vin)
+        # Neplatny VIN sa vracia ako normalna odpoved 200, aby frontend mohol zobrazit dovod.
         if not validation["valid"]:
             return jsonify({
                 "status": "invalid",
                 "vin": vin,
                 **validation
             }), 200
+        # Az po matematickej validacii sa kontroluje, ci VIN pozna nasa databaza.
         vehicle = Vehicle.query.filter_by(vin=vin).first()
+        # Platny, ale neznamy VIN je iny stav ako syntakticky chybny VIN.
         if not vehicle:
             return jsonify({
                 "status": "not_found",

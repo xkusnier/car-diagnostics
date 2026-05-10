@@ -11,6 +11,7 @@ from utils import *
 
 bp = Blueprint("telemetry", __name__)
 
+# Jednotlive endpointy telemetrie vracaju mensie casti live stavu pre frontend karty.
 def get_device_odometer(device_id):
     """
     Ziskanie posledneho znameho stavu odometra zariadenia
@@ -35,6 +36,7 @@ def get_device_odometer(device_id):
     if user.role != "admin":
         device = Device.query.filter_by(id=device_id, user_id=user_id).first()
         if not device:
+            # Kazdy maly endpoint vracia iba cast telemetrie potrebnu pre konkretny widget.
             return jsonify({"error": "Device not found or not owned by user"}), 404
     t = _get_latest_telemetry(device_id)
     if not t or t.odometer is None:
@@ -48,6 +50,7 @@ def get_device_odometer(device_id):
         "timestamp": _iso(t.created_at)
     }), 200
 
+# Bateria sa cita z poslednej live telemetrie priradeneho vozidla.
 def get_device_battery(device_id):
     """
     Ziskanie poslednych bateriovych dat zariadenia
@@ -76,6 +79,7 @@ def get_device_battery(device_id):
     t = _get_latest_telemetry(device_id)
     if not t or t.battery_voltage is None:
         return jsonify({"error": "No battery data"}), 404
+    # Live endpoint zjednocuje viac hodnot naraz pre hlavnu obrazovku detailu.
     return jsonify({
         "status": "success",
         "device_id": device_id,
@@ -85,6 +89,7 @@ def get_device_battery(device_id):
         "timestamp": _iso(t.created_at)
     }), 200
 
+# Motorove udaje su oddelene, aby frontend nemusel nacitavat cely live payload.
 def get_device_engine(device_id):
     """
     Ziskanie poslednych motorovych dat zariadenia
@@ -128,6 +133,7 @@ def get_device_engine(device_id):
         "timestamp": _iso(t.created_at)
     }), 200
 
+# Spotreba a palivove udaje sa vracaju samostatne pre prehladne zobrazenie.
 def get_device_fuel(device_id):
     """
     Ziskanie poslednych palivovych dat zariadenia
@@ -169,6 +175,7 @@ def get_device_fuel(device_id):
         "timestamp": _iso(t.created_at)
     }), 200
 
+# Rychlost sa cita z live riadku, teda z poslednej prijatej vzorky.
 def get_device_speed(device_id):
     """
     Ziskanie poslednej rychlosti zariadenia
@@ -205,6 +212,7 @@ def get_device_speed(device_id):
         "timestamp": _iso(t.created_at)
     }), 200
 
+# Poloha berie posledny ulozeny GPS zaznam pre vozidlo priradene k zariadeniu.
 def get_device_location(device_id):
     """
     Ziskanie poslednej GPS polohy zariadenia
@@ -235,6 +243,7 @@ def get_device_location(device_id):
             device = Device.query.filter_by(id=device_id, user_id=user_id).first()
             if not device:
                 return jsonify({"error": "Device not found or not owned by user"}), 404
+        # Telemetria sa hlada cez posledne vozidlo priradene k zariadeniu.
         vehicle_id = _get_vehicle_id_from_device(device_id)
         if not vehicle_id:
             return jsonify({"error": "No VIN associated"}), 404
@@ -259,6 +268,7 @@ def get_device_location(device_id):
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
+# Kompletny live endpoint sklada jeden vacsi JSON pre detail zariadenia alebo dashboard.
 def get_device_live(device_id):
     """
     Ziskanie kompletnych live dat zariadenia
@@ -287,10 +297,12 @@ def get_device_live(device_id):
             device = Device.query.filter_by(id=device_id, user_id=user_id).first()
             if not device:
                 return jsonify({"error": "Device not found"}), 404
+        # Pri polohe sa tiez vychadza z aktualneho vozidla pre dane zariadenie.
         vehicle_id = _get_vehicle_id_from_device(device_id)
         if not vehicle_id:
             return jsonify({"error": "No VIN associated"}), 404
         live = VehicleTelemetryLive.query.filter_by(vehicle_id=vehicle_id).first()
+        # Ak este neexistuje ziadna vzorka, frontend dostane 404 namiesto prazdnych hodnot.
         if not live:
             return jsonify({"error": "No live data"}), 404
         return jsonify({

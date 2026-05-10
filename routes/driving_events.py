@@ -11,6 +11,7 @@ from utils import *
 
 bp = Blueprint("driving_events", __name__)
 
+# Endpoint prijima udalosti z jazdy priamo zo zariadenia a uklada ich k vozidlu.
 def receive_driving_event():
     """
     Prijem jazdnych udalosti z RPi / gyroskopu / akcelerometra
@@ -117,6 +118,7 @@ def receive_driving_event():
         description: Server error
     """
     try:
+        # Jazdna udalost sa posiela ako samostatny JSON, oddelene od beznej telemetrie.
         payload = request.get_json()
         device_id_raw = payload.get("device_id")
         vin = payload.get("vin")
@@ -131,14 +133,18 @@ def receive_driving_event():
         try:
             device_id = int(device_id_raw)
         except (TypeError, ValueError):
+            # Odpoved obsahuje aj pocet, aby frontend nemusel pocitat dlzku zoznamu sam.
             return jsonify({"error": "device_id must be an integer"}), 400
         if not event_type:
             return jsonify({"error": "Missing event_type"}), 400
+        # Udalosti mimo povoleneho zoznamu neukladam, aby v databaze nevznikali nahodne typy.
+        # Backend odmietne nezname typy, aby sa do DB nedostali nahodne texty.
         if event_type not in ALLOWED_DRIVING_EVENT_TYPES:
             return jsonify({
                 "error": "Invalid event_type",
                 "allowed": sorted(list(ALLOWED_DRIVING_EVENT_TYPES))
             }), 400
+        # Udalost musi byt naviazana na existujuce diagnosticke zariadenie.
         device = Device.query.get(device_id)
         if not device:
             return jsonify({"error": f"Device {device_id} not found"}), 404
@@ -152,6 +158,7 @@ def receive_driving_event():
             if state and state.last_vin_id:
                 vehicle = Vehicle.query.get(state.last_vin_id)
         if timestamp_raw is None:
+            # Cas udalosti moze poslat zariadenie, inak sa pouzije cas prijatia na serveri.
             event_timestamp = datetime.utcnow()
         else:
             try:
@@ -182,6 +189,7 @@ def receive_driving_event():
             if v is None:
                 return None
             return float(v)
+        # Do DB sa uklada aj senzorovy kontext, aby sa udalost dala neskor vyhodnotit.
         new_event = DrivingEvent(
             device_id=device_id,
             vehicle_id=vehicle.id if vehicle else None,
@@ -202,6 +210,7 @@ def receive_driving_event():
         mark_device_online(device)
         db.session.commit()
         event_payload = serialize_driving_event(new_event)
+        # Frontend dostane novy incident v realnom case cez websocket room zariadenia.
         socketio.emit("driving_event", event_payload, room=f"device:{device_id}")
         return jsonify({
             "status": "success",
@@ -213,6 +222,7 @@ def receive_driving_event():
         print("❌ DRIVING EVENT ERROR:", e)
         return jsonify({"error": str(e)}), 500
 
+# Vypis udalosti podla zariadenia, vhodny pre detail konkretneho diagnostickeho modulu.
 def get_device_events(device_id):
     """
     Historia jazdnych udalosti pre konkretne zariadenie
@@ -258,6 +268,7 @@ def get_device_events(device_id):
             return jsonify({"error": "Device not found or not owned by user"}), 404
         limit = request.args.get("limit", default=50, type=int)
         event_type = request.args.get("event_type", default=None, type=str)
+        # Zakladny query sa potom podla parametrov doplni o limit a zoradenie.
         query = DrivingEvent.query.filter_by(device_id=device_id)
         if event_type:
             query = query.filter(DrivingEvent.event_type == event_type.upper().strip())
@@ -276,6 +287,7 @@ def get_device_events(device_id):
         print("❌ GET DEVICE EVENTS ERROR:", e)
         return jsonify({"error": str(e)}), 500
 
+# Vypis udalosti podla VIN pouziva overenie, ci ma pouzivatel k vozidlu pristup.
 def get_vehicle_events(vin):
     """
     Historia jazdnych udalosti pre konkretne vozidlo podla VIN

@@ -11,6 +11,7 @@ from utils import *
 
 bp = Blueprint("communication", __name__)
 
+# Prvy krok spojenia zo zariadenia - backend vytvori alebo obnovi device zaznam.
 def device_connect_syn():
     """
     3-way handshake - SYN
@@ -63,10 +64,14 @@ def device_connect_syn():
         description: Server error
     """
     try:
+        # Telo requestu sa cita ako JSON, lebo zariadenie posiela jednoduche datove spravy.
         data = request.get_json()
+        # device_id je hlavny identifikator RPi zariadenia pri handshaku.
         device_id = data.get("device_id")
         if not device_id:
             return jsonify({"error": "missing device_id"}), 400
+        # Ak device_id uz existuje, iba sa obnovi stav; inak sa vytvori novy device zaznam.
+        # Najprv sa hlada existujuce zariadenie, aby sa nevytvarali duplicity.
         device = Device.query.get(device_id)
         if not device:
             device = Device(id=device_id, status=False)
@@ -78,6 +83,7 @@ def device_connect_syn():
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
+# Druhy krok spojenia potvrdi zariadenie a podla VIN ho priradi k vozidlu.
 def device_connect_ack():
     """
     3-way handshake - ACK
@@ -149,6 +155,7 @@ def device_connect_ack():
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
+# Heartbeat iba udrzi zariadenie online a vrati mu cakajuce prikazy.
 def heartbeat():
     """
     Heartbeat od RPi (keep-alive + command polling)
@@ -219,8 +226,10 @@ def heartbeat():
         else:
             mark_device_online(device)
         db.session.commit()
+        # Heartbeat zaroven sluzi ako polling na prikazy cakajuce pre zariadenie.
         cmd = PendingCommand.query.filter_by(device_id=device_id, executed=False).first()
         if cmd:
+            # Prikaz sa oznaci ako prevzaty hned pri odoslani zariadeniu.
             cmd.executed = True
             db.session.commit()
             return jsonify({"command": cmd.command}), 200
@@ -228,6 +237,7 @@ def heartbeat():
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
+# Frontend cez tento endpoint vlozi prikaz, ktory si neskor precita zariadenie.
 def trigger_command():
     """
     Manualne spustenie prikazu na zariadeni
@@ -296,6 +306,7 @@ def trigger_command():
         data = request.get_json()
         device_id = data.get("device_id")
         command = data.get("command")
+        # Povoluju sa iba prikazy, ktore zariadenie realne pozna.
         valid_commands = [
             "GET_VIN",
             "GET_DTCS_PERM",
@@ -306,6 +317,7 @@ def trigger_command():
         ]
         if command not in valid_commands:
             return jsonify({"error": "invalid command"}), 400
+        # Prikaz sa neodosiela priamo, ale ulozi sa a zariadenie si ho vyzdvihne cez heartbeat.
         cmd = PendingCommand(device_id=device_id, command=command)
         db.session.add(cmd)
         db.session.commit()
@@ -313,6 +325,7 @@ def trigger_command():
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
+# Hlavny vstup pre CAN/OBD data zo zariadenia, vratane DTC a telemetrie.
 def receive_can_packet():
     """
     Prijem CAN packetov z RPi (VIN, DTC, clear_status, telemetria)
@@ -417,6 +430,7 @@ def receive_can_packet():
         description: Server error
     """
     try:
+        # CAN packet moze obsahovat viac typov udajov, preto sa dalej vetvi podla dostupnych klucov.
         payload = request.get_json()
         device_id = payload.get("device_id")
         vin = payload.get("vin")
@@ -431,7 +445,9 @@ def receive_can_packet():
         device = Device.query.get(device_id)
         if not device:
             return jsonify({"error": f"Device {device_id} not found"}), 404
+        # Telemetria bez VIN sa smie ulozit iba vtedy, ked uz zariadenie ma priradene posledne vozidlo.
         if any(k in payload for k in ["odometer", "battery", "engine", "fuel", "speed"]) and not payload.get("vin"):
+            # Stav zariadenie-vozidlo uklada posledny VIN pre dalsie spravy bez VIN.
             state = DeviceVehicle.query.filter_by(device_id=device_id).first()
             if not state or not state.last_vin_id:
                 return jsonify({
@@ -449,11 +465,13 @@ def receive_can_packet():
                 "vehicle_id": state.last_vin_id,
                 "timestamp": t["timestamp"]
             }), 201
+        # Stav mazania DTC posiela zariadenie ako odpoved na predosly prikaz clear_dtc.
         if clear_status is not None:
             state = DeviceVehicle.query.filter_by(device_id=device_id).first()
             if not state or not state.last_vin_id:
                 return jsonify({"error": "No VIN associated for clear"}), 400
         if clear_status == "ok":
+            # Pri uspesnom vymazani sa odstrania iba aktivne chyby, historia ostava zachovana.
             DTCCodeActive.query.filter_by(vin_id=state.last_vin_id).delete()
             db.session.commit()
             socketio.emit("clear_confirmation", {
@@ -463,11 +481,17 @@ def receive_can_packet():
                 "timestamp": datetime.utcnow().isoformat()
             })
             return jsonify({"status": "DTC cleared", "vin_id": state.last_vin_id}), 200
+        # VIN cast spravy vytvori alebo aktualizuje vozidlo a prepoji ho so zariadenim.
         if vin:
+            # VIN sa normalizuje na velke pismena, aby sa rovnake auto neulozilo viackrat.
             vin = vin.strip().upper()
+            # Zakladna kontrola dlzky odfiltruje neplatne VIN este pred zapisom do DB.
             if len(vin) != 17:
                 return jsonify({"error": "VIN must be 17 characters"}), 400
+            # VIN je hlavny identifikator auta, preto sa najprv hlada existujuce vozidlo.
+            # Vozidlo sa hlada podla VIN, ktory je v modeli unikatny.
             vehicle = Vehicle.query.filter_by(vin=vin).first()
+            # Ak auto este neexistuje, zalozi sa minimalny zaznam a doplnia sa dostupne metadata.
             if not vehicle:
                 vehicle = Vehicle(vin=vin)
                 if hasattr(Vehicle, "year") and year:
@@ -481,6 +505,7 @@ def receive_can_packet():
                 db.session.add(vehicle)
                 db.session.commit()
             else:
+                # Pri existujucom vozidle sa menia iba metadata, ktore prisli v aktualnej sprave.
                 updated = False
                 if hasattr(Vehicle, "year") and year and vehicle.year != year:
                     vehicle.year = year
@@ -503,6 +528,7 @@ def receive_can_packet():
                 db.session.add(state)
             else:
                 state.last_vin_id = vehicle.id
+            # Ak je zariadenie priradene pouzivatelovi, vozidlo sa automaticky prida do jeho zoznamu.
             if device.user_id:
                 user_vehicle = UserVehicle.query.filter_by(
                     user_id=device.user_id,
@@ -524,6 +550,7 @@ def receive_can_packet():
                 "model": vehicle.model,
                 "engine": vehicle.engine
             }), 201
+        # DTC cast spravy riesi nove chyby alebo informaciu, ze ziadne chyby nie su aktivne.
         if dtc_code:
             dtc_code = dtc_code.strip().upper()
             state = DeviceVehicle.query.filter_by(device_id=device_id).first()
@@ -532,6 +559,7 @@ def receive_can_packet():
             vehicle = Vehicle.query.get(state.last_vin_id)
             if not vehicle:
                 return jsonify({"error": "Vehicle not found"}), 404
+            # Specialne hodnoty znamenaju, ze zariadenie nenaslo aktivne diagnosticke kody.
             if dtc_code in {"NO_DTCS", "NO_DTCS", "NO CODES", "NO_CODES"}:
                 DTCCodeActive.query.filter_by(vin_id=vehicle.id).delete()
                 db.session.commit()
@@ -548,6 +576,7 @@ def receive_can_packet():
                     "message": "No active DTCs reported",
                     "vin": vehicle.vin
                 }), 200
+            # Popis a zavaznost sa beru z lokalnej databazy DTC kodov, ak je dostupna.
             meaning = DtcCodeMeaning.query.filter(
                 db.func.lower(DtcCodeMeaning.dtc_code) == dtc_code.lower()
             ).first()
@@ -555,9 +584,11 @@ def receive_can_packet():
             severity = detect_severity_from_description(description)
             recommended_action = get_recommended_action(severity)
             db.session.add(DTCCodeHistory(vin_id=vehicle.id, dtc_code=dtc_code, severity=severity))
+            # Pred vlozenim aktivnej chyby sa vymaze stary zaznam rovnakeho kodu, aby nebol duplicitny.
             DTCCodeActive.query.filter_by(vin_id=vehicle.id, dtc_code=dtc_code).delete()
             db.session.add(DTCCodeActive(vin_id=vehicle.id, dtc_code=dtc_code, severity=severity))
             db.session.commit()
+            # Notifikacie sa posielaju vsetkym pouzivatelom, ktori maju vozidlo priradene.
             owner_links = UserVehicle.query.filter_by(vehicle_id=vehicle.id).all()
             vehicle_info = {
                 "vin": vehicle.vin,
@@ -565,6 +596,7 @@ def receive_can_packet():
                 "model": vehicle.model,
                 "year": vehicle.year,
             }
+            # Kazdy vlastnik vozidla dostane emailovu notifikaciu podla ulozenej adresy.
             for owner_link in owner_links:
                 owner = User.query.get(owner_link.user_id)
                 if owner and owner.email:
@@ -596,6 +628,7 @@ def receive_can_packet():
         db.session.rollback()
         return jsonify({"error": str(e)}), 500
 
+# GPS poloha sa prijima oddelene od CAN dat, aby fungovala aj pri inom tempe odosielania.
 def receive_location():
     """
     Prijem GPS polohy z RPi
@@ -646,27 +679,33 @@ def receive_location():
         description: Server error
     """
     try:
+        # Location endpoint prijima samostatne GPS data, aby sa poloha dala posielat aj mimo CAN packetu.
         payload = request.get_json()
         device_id_raw = payload.get("device_id")
         latitude_raw = payload.get("latitude")
         longitude_raw = payload.get("longitude")
         timestamp_raw = payload.get("timestamp")
         try:
+            # device_id sa konvertuje na int kvoli konzistentnemu hladaniu v databaze.
             device_id = int(device_id_raw)
         except (TypeError, ValueError):
             return jsonify({"error": "device_id must be an integer"}), 400
         try:
+            # Suradnice sa validuju ako cisla, nie iba ako pritomne textove hodnoty.
             latitude = float(latitude_raw)
             longitude = float(longitude_raw)
         except (TypeError, ValueError):
             return jsonify({"error": "latitude and longitude must be numbers"}), 400
+        # Latitude ma fyzicky platny rozsah od -90 do 90 stupnov.
         if latitude < -90 or latitude > 90:
             return jsonify({"error": "latitude must be between -90 and 90"}), 400
+        # Longitude ma fyzicky platny rozsah od -180 do 180 stupnov.
         if longitude < -180 or longitude > 180:
             return jsonify({"error": "longitude must be between -180 and 180"}), 400
         device = Device.query.get(device_id)
         if not device:
             return jsonify({"error": f"Device {device_id} not found"}), 404
+        # Ak zariadenie neposle cas, backend pouzije aktualny cas prijatia spravy.
         if timestamp_raw is None:
             location_timestamp = datetime.utcnow()
         else:

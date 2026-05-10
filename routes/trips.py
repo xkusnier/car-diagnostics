@@ -11,6 +11,7 @@ from utils import *
 
 bp = Blueprint("trips", __name__)
 
+# Jazdy sa nacitavaju podla VIN a vratia sa iba pouzivatelovi s pristupom k vozidlu.
 def get_vehicle_trips(vin):
     """
     Ziskanie vsetkych jazd pre konkretne vozidlo
@@ -31,10 +32,13 @@ def get_vehicle_trips(vin):
     try:
         refresh_stale_device_statuses()
         user_id = int(get_jwt_identity())
+        # Prava sa kontroluju cez prihlaseneho pouzivatela z JWT tokenu.
         user = User.query.get(user_id)
         if not user:
             return jsonify({"error": "User not found"}), 404
+        # Jazdy sa vyhladavaju podla VIN, ktory pozna frontend aj pouzivatel.
         vehicle = Vehicle.query.filter_by(vin=vin.upper()).first()
+        # Bez vozidla nema zmysel pokracovat vo vybere jazd.
         if not vehicle:
             return jsonify({"error": "Vehicle not found"}), 404
         user_vehicle = UserVehicle.query.filter_by(
@@ -43,11 +47,13 @@ def get_vehicle_trips(vin):
         ).first()
         if not user_vehicle and user.role != "admin":
             return jsonify({"error": "Vehicle not owned by user"}), 403
+        # Jazdy sa vracaju od najnovsej, co je vhodne pre historiu vo frontende.
         trips = Trip.query.filter_by(
             vehicle_id=vehicle.id,
             is_completed=True
         ).order_by(Trip.start_time.desc()).all()
         trips_data = []
+        # ORM objekty sa prekladaju na JSON rucne, aby mal frontend presny tvar dat.
         for trip in trips:
             if not trip.avg_consumption_l100km and trip.samples_count > 0:
                 consumptions = db.session.query(

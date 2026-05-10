@@ -11,6 +11,7 @@ from utils import *
 
 bp = Blueprint("system", __name__)
 
+# Jednoduchy health endpoint pre Render alebo rychle overenie, ze backend bezi.
 def health_check():
     """
     Health check endpoint
@@ -28,8 +29,10 @@ def health_check():
               type: string
               example: ok
     """
+    # Health check vracia jednoduchu odpoved pre hosting alebo rychlu kontrolu servera.
     return jsonify({"status": "ok"}), 200
 
+# Inicializacia DB je ponechana ako pomocny endpoint pre nasadenie a testovanie.
 def init_db():
     """
     Inicializacia databazy
@@ -53,9 +56,11 @@ def init_db():
               type: string
               example: "Database ok"
     """
+    # Inicializacia vytvori tabulky podla aktualnych SQLAlchemy modelov.
     db.create_all()
     return jsonify({"status": "Database ok"})
 
+# Domovska odpoved sluzi hlavne ako rozcestnik a kontrola dostupnych endpointov.
 def home():
     """
     Health check endpoint
@@ -91,6 +96,7 @@ def home():
     """
     return jsonify({"status": "ok", "message": "Flask bezi"})
 
+# Debug vypis dat z databazy pomaha pri kontrole stavu pocas vyvoja.
 def show_all():
     """
     Vypis vsetkych vozidiel a DTC kodov

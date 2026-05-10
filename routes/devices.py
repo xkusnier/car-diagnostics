@@ -11,6 +11,7 @@ from utils import *
 
 bp = Blueprint("devices", __name__)
 
+# Mazanie zariadenia je obmedzene na vlastnika alebo administratora.
 def delete_device(device_id):
     """
     Odstranenie zariadenia
@@ -48,19 +49,24 @@ def delete_device(device_id):
         description: Server error
     """
     try:
+        # Mazanie zariadenia je viazane na prihlaseneho pouzivatela alebo admina.
         user_id = int(get_jwt_identity())
         user = User.query.get(user_id)
         if not user:
             return jsonify({"error": "User not found"}), 404
         if user.role == "admin":
+            # Najprv sa overi existencia zariadenia, az potom prava pouzivatela.
             device = Device.query.get(device_id)
         else:
             device = Device.query.filter_by(id=device_id, user_id=user_id).first()
         if not device:
             return jsonify({"error": "Device not found or not owned by user"}), 404
         try:
+            # Najprv sa rucne odstrani vazba na vozidlo, aby po zariadeni neostal stary link.
             DeviceVehicle.query.filter_by(device_id=device_id).delete()
+            # Cakajuce prikazy sa pri zmazani zariadenia uz nesmu dalej vykonat.
             PendingCommand.query.filter_by(device_id=device_id).delete()
+            # Vdaka cascade vztahom sa pri zmazani odstrania aj naviazane pomocne zaznamy.
             db.session.delete(device)
             db.session.commit()
             return jsonify({
@@ -75,6 +81,7 @@ def delete_device(device_id):
         print("❌ DELETE DEVICE ERROR:", e)
         return jsonify({"error": str(e)}), 500
 
+# Manualne pridanie zariadenia z frontendu, ked este nebolo vytvorene cez RPi komunikaciu.
 def add_device():
     """
     Pridanie noveho zariadenia
@@ -152,6 +159,7 @@ def add_device():
         description: Server error
     """
     try:
+        # Telo requestu obsahuje device_id a pri adminovi volitelne aj cieloveho pouzivatela.
         payload = request.get_json()
         device_id_raw = payload.get("device_id")
         target_user_id = payload.get("user_id")
@@ -159,17 +167,21 @@ def add_device():
         current_user = User.query.get(current_user_id)
         if not current_user:
             return jsonify({"error": "User not found"}), 404
+        # Bezny pouzivatel nemoze priradovat zariadenie inemu uctu.
         if current_user.role != "admin":
             target_user_id = current_user.id
         if not target_user_id:
             return jsonify({"error": "Missing user_id (admin only)"}), 400
         try:
+            # Device ID sa uklada ako cislo, preto sa validuje este pred zapisom.
             device_id = int(device_id_raw)
         except (ValueError, TypeError):
             return jsonify({"error": "Device ID must be an integer"}), 400
+        # Existujuci device sa iba priradi k uctu, nevytvara sa duplicita.
         existing = Device.query.get(device_id)
         if existing:
             return jsonify({"error": f"Device ID {device_id} already exists"}), 409
+        # Novo pridane zariadenie zacina ako offline, kym neposle komunikaciu.
         new_device = Device(id=device_id, user_id=int(target_user_id), status=False)
         db.session.add(new_device)
         db.session.commit()
@@ -184,6 +196,7 @@ def add_device():
         print("❌ ADD DEVICE ERROR:", e)
         return jsonify({"error": str(e)}), 500
 
+# Detail diagnostiky zariadenia spaja online stav, vozidlo, aktivne DTC a telemetriu.
 def device_diagnostics(device_id):
     """
     Ziskanie diagnostickych udajov pre zariadenie
@@ -257,20 +270,25 @@ def device_diagnostics(device_id):
         description: Server error
     """
     try:
+        # Pred vypisom zariadeni sa najprv opravia stare online stavy.
+        # Pred diagnostikou sa aktualizuje online/offline stav zariadenia.
         refresh_stale_device_statuses()
         user_id = int(get_jwt_identity())
         user = User.query.get(user_id)
         if not user:
             return jsonify({"error": "User not found"}), 404
         if user.role == "admin":
+            # Diagnostika sa sklada zo stavu zariadenia, posledneho VIN a DTC kodov.
             device = Device.query.get(device_id)
         else:
             device = Device.query.filter_by(id=device_id, user_id=user_id).first()
         if not device:
             return jsonify({"error": "Device not found or not owned by user"}), 404
+        # Predvolene hodnoty ostanu None, ak zariadenie este nema priradene vozidlo.
         vin = year = brand = model = engine = None
         dtcs = []
         if device.link and len(device.link) > 0 and device.link[0].last_vin_id:
+            # VIN sa ziska cez posledne priradene vozidlo zariadenia.
             vin_obj = Vehicle.query.get(device.link[0].last_vin_id)
             if vin_obj:
                 vin = vin_obj.vin
@@ -278,6 +296,7 @@ def device_diagnostics(device_id):
                 year = vin_obj.year
                 model = vin_obj.model
                 engine = vin_obj.engine
+                # Aktivne DTC sa nacitaju spolu s popisom cez outer join.
                 dtcs_query = (
                     db.session.query(
                         DTCCodeActive.dtc_code,
@@ -290,6 +309,7 @@ def device_diagnostics(device_id):
                     .order_by(DTCCodeActive.created_at.desc())
                     .all()
                 )
+                # Vysledne DTC sa mapuju na format, ktory priamo pouziva obrazovka diagnostiky.
                 dtcs = [{
                     "dtc_code": d.dtc_code,
                     "description": d.dtc_description or "No description",
@@ -312,6 +332,7 @@ def device_diagnostics(device_id):
         print("❌ DEVICE DIAGNOSTICS ERROR:", e)
         return jsonify({"error": str(e)}), 500
 
+# Zoznam zariadeni sa filtruje podla roly, admin vidi viac ako bezny pouzivatel.
 def my_devices():
     """
     Zoznam zariadeni prihlaseneho pouzivatela
@@ -378,8 +399,11 @@ def my_devices():
         if user.role == "admin":
             devices = Device.query.all()
         else:
+            # Beznemu pouzivatelovi sa vracaju iba jeho vlastne zariadenia.
             devices = Device.query.filter_by(user_id=user_id).all()
+        # Zoznam zariadeni sa sklada rucne, lebo obsahuje aj vypocitane polia.
         result = []
+        # Kazde zariadenie sa doplni o posledne vozidlo a pocet aktivnych chyb.
         for d in devices:
             vin = None
             if d.link and len(d.link) > 0 and d.link[0].last_vin_id:
@@ -396,6 +420,7 @@ def my_devices():
         print("❌ MY DEVICES ERROR:", e)
         return jsonify({"error": str(e)}), 500
 
+# Zariadenie moze explicitne oznamit odpojenie, aby sa stav nemusel menit az po timeout-e.
 def device_offline(device_id):
     """
     Nastavenie zariadenia ako offline
@@ -420,6 +445,7 @@ def device_offline(device_id):
         device = Device.query.get(device_id)
         if not device:
             return jsonify({"error": "Device not found"}), 404
+        # Offline endpoint nastavuje iba stav, ostatne data zariadenia ostavaju zachovane.
         device.status = False
         db.session.commit()
         return jsonify({"status": "success", "device_id": device_id, "message": "Device set to offline"}), 200
