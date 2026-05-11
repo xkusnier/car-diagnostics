@@ -1,5 +1,7 @@
-from datetime import datetime
+from datetime import datetime, timedelta
 from extensions import db
+def now_plus_2h():
+    return datetime.utcnow() + timedelta(hours=2)
 
 # Pouzivatel aplikacie, ku ktoremu sa viazu zariadenia a vozidla.
 class User(db.Model):
@@ -32,7 +34,7 @@ class DeviceVehicle(db.Model):
     # Posledny VIN je ulozeny ako FK, aby sa telemetry a DTC vedeli naviazat na vozidlo.
     last_vin_id = db.Column(db.Integer, db.ForeignKey("vehicles.id"), nullable=True)
     # updated_at sa automaticky meni pri kazdej zmene prepojenia zariadenia a vozidla.
-    updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    updated_at = db.Column(db.DateTime, default=now_plus_2h, onupdate=now_plus_2h)
 
 # Vozidlo identifikovane podla VIN, na ktore sa viazu DTC kody, jazdy a telemetria.
 class Vehicle(db.Model):
@@ -56,7 +58,7 @@ class DTCCodeActive(db.Model):
     dtc_code = db.Column(db.String(20), nullable=False)
     # Ak sa zavaznost nepodari urcit presne, pouzije sa stredna hodnota.
     severity = db.Column(db.String(20), default="medium")
-    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+    created_at = db.Column(db.DateTime, default=now_plus_2h)
 
 # Jedna jazda vozidla; vznikne pri spusteni motora a uzavrie sa po jeho vypnuti.
 class Trip(db.Model):
@@ -88,7 +90,7 @@ class Trip(db.Model):
     engine_starts = db.Column(db.Integer, default=1)
     # Neuzavreta jazda znamena, ze motor podla poslednych dat este bezal.
     is_completed = db.Column(db.Boolean, default=False)
-    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+    created_at = db.Column(db.DateTime, default=now_plus_2h)
 
 # Historia DTC sluzi na spatne zobrazenie uz zachytenych alebo vymazanych chyb.
 class DTCCodeHistory(db.Model):
@@ -97,7 +99,7 @@ class DTCCodeHistory(db.Model):
     vin_id = db.Column(db.Integer, db.ForeignKey("vehicles.id"), nullable=False)
     dtc_code = db.Column(db.String(20), nullable=False)
     severity = db.Column(db.String(20), default="medium")
-    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+    created_at = db.Column(db.DateTime, default=now_plus_2h)
 
 # Samostatna vazba pouzivatela na vozidlo umoznuje jedno auto priradit viacerym uctom.
 class UserVehicle(db.Model):
@@ -120,7 +122,7 @@ class PendingCommand(db.Model):
     command = db.Column(db.String(50), nullable=False)
     # Po prevzati prikazu zariadenim sa zaznam iba oznaci ako vykonany.
     executed = db.Column(db.Boolean, default=False)
-    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+    created_at = db.Column(db.DateTime, default=now_plus_2h)
 
 # Lokalna databaza vyznamov DTC kodov importovana z CSV suboru.
 class DtcCodeMeaning(db.Model):
@@ -168,7 +170,7 @@ class VehicleTelemetryLive(db.Model):
     maf = db.Column(db.Float, nullable=True)
     fuel_type = db.Column(db.String(20), nullable=True)
     speed = db.Column(db.Integer, nullable=True)
-    created_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    created_at = db.Column(db.DateTime, default=now_plus_2h, onupdate=now_plus_2h)
 
 # Historicka telemetria uchovava jednotlive vzorky, z ktorych sa potom rataju statistiky jazd.
 class VehicleTelemetryHistory(db.Model):
@@ -194,7 +196,7 @@ class VehicleTelemetryHistory(db.Model):
     maf = db.Column(db.Float, nullable=True)
     fuel_type = db.Column(db.String(20), nullable=True)
     speed = db.Column(db.Integer, nullable=True)
-    created_at = db.Column(db.DateTime, default=datetime.utcnow, index=True)
+    created_at = db.Column(db.DateTime, default=now_plus_2h, index=True)
 
 # Historia polohy je oddelena od telemetrie, lebo GPS data nemusia prist spolu s OBD udajmi.
 class VehicleLocationHistory(db.Model):
@@ -207,7 +209,7 @@ class VehicleLocationHistory(db.Model):
     # Poloha sa uklada samostatne, aby sa dala kreslit trasa aj bez celej telemetrie.
     latitude = db.Column(db.Float, nullable=False)
     longitude = db.Column(db.Float, nullable=False)
-    created_at = db.Column(db.DateTime, default=datetime.utcnow, index=True)
+    created_at = db.Column(db.DateTime, default=now_plus_2h, index=True)
 
 # Udalosti jazdy ukladaju prudke brzdenia, zrychlenia, zatacky alebo naraz.
 class DrivingEvent(db.Model):
@@ -229,6 +231,6 @@ class DrivingEvent(db.Model):
     gyro_x = db.Column(db.Float, nullable=True)
     gyro_y = db.Column(db.Float, nullable=True)
     gyro_z = db.Column(db.Float, nullable=True)
-    created_at = db.Column(db.DateTime, default=datetime.utcnow, index=True)
+    created_at = db.Column(db.DateTime, default=now_plus_2h, index=True)
     device = db.relationship("Device", backref=db.backref("driving_events", lazy="dynamic"))
     vehicle = db.relationship("Vehicle", backref=db.backref("driving_events", lazy="dynamic"))
