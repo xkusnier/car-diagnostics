@@ -466,7 +466,7 @@ def receive_can_packet():
             mark_device_online(device)
             db.session.commit()
             _save_telemetry_to_db(int(device_id), t)
-            print(f" Emitting telemetry_update to device:{int(device_id)}", t)
+            socketio.emit("telemetry_update", t, room=f"device:{int(device_id)}")
             return jsonify({
                 "status": "telemetry stored",
                 "device_id": int(device_id),
