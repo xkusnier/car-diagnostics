@@ -4,12 +4,14 @@ from models import *
 from utils import *
 
 # Socket.IO event pre zakladne pripojenie klienta.
+@socketio.on("connect")
 def ws_connect():
     # Po pripojeni klient hned dostane potvrdenie, ze websocket spojenie funguje.
     emit("server_ready", {"status": "ok"})
 
 # Klient sa prihlasi do miestnosti podla device_id, aby dostaval iba data pre dane zariadenie.
 # AI: Tato WebSocket funkcia bola ciastocne generovana pomocou ChatGPT a nasledne upravena autorom.
+@socketio.on("subscribe_device")
 def ws_subscribe_device(data):
     """
     FE: socket.emit("subscribe_device", {device_id: 1})
@@ -26,6 +28,7 @@ def ws_subscribe_device(data):
 
 # Telemetria prijata cez WebSocket sa najprv ulozi a potom sa rozosle ostatnym klientom.
 # AI: Tato WebSocket funkcia bola ciastocne generovana pomocou ChatGPT a nasledne upravena autorom.
+@socketio.on("telemetry")
 def ws_telemetry(data):
     """
     RPi (alebo test client) posiela realtime telemetry cez WS.
